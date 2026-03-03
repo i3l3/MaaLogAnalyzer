@@ -30,6 +30,20 @@ const statusInfo = computed(() => {
   }
 })
 
+// 当前选中的识别尝试（用于获取时间戳等元信息）
+const currentAttempt = computed(() => {
+  if (!props.selectedNode) return null
+  if (props.selectedRecognitionIndex === null || props.selectedRecognitionIndex === undefined) return null
+
+  const attempt = props.selectedNode.recognition_attempts[props.selectedRecognitionIndex]
+
+  if (props.selectedNestedIndex !== null && props.selectedNestedIndex !== undefined) {
+    return attempt?.nested_nodes?.[props.selectedNestedIndex] || null
+  }
+
+  return attempt || null
+})
+
 // 当前显示的识别详情（可能是选中的识别尝试、嵌套节点，或节点的最终识别）
 const currentRecognition = computed(() => {
   if (!props.selectedNode) return null
@@ -124,6 +138,10 @@ const copyToClipboard = (text: string) => {
               {{ currentRecognition?.name }}
             </n-descriptions-item>
 
+            <n-descriptions-item label="执行时间">
+              {{ currentAttempt?.timestamp || '-' }}
+            </n-descriptions-item>
+
             <n-descriptions-item label="识别位置" v-if="currentRecognition?.box">
               <n-text code>
                 [{{ currentRecognition.box.join(', ') }}]
@@ -176,6 +194,10 @@ const copyToClipboard = (text: string) => {
               <n-tag :type="selectedNode.action_details?.success ? 'success' : 'error'" size="small">
                 {{ selectedNode.action_details?.success ? '成功' : '失败' }}
               </n-tag>
+            </n-descriptions-item>
+
+            <n-descriptions-item label="执行时间">
+              {{ selectedNode.timestamp || '-' }}
             </n-descriptions-item>
 
             <n-descriptions-item label="目标位置" :span="2" v-if="selectedNode.action_details?.box">
