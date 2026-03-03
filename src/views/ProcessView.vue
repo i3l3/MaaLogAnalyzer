@@ -359,6 +359,9 @@ const handleNestedClick = (node: NodeInfo, attemptIndex: number, nestedIndex: nu
                       <n-text depth="3" style="font-size: 12px" v-if="task.duration">
                         耗时: {{ formatDuration(task.duration) }}
                       </n-text>
+                      <n-text depth="3" style="font-size: 12px" v-if="task.start_time">
+                        时间: {{ task.start_time }}
+                      </n-text>
                     </n-flex>
                   </n-flex>
                 </n-list-item>
