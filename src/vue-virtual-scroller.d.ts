@@ -1,7 +1,43 @@
 declare module 'vue-virtual-scroller' {
-  import { DefineComponent } from 'vue'
+  import { DefineComponent, SlotsType } from 'vue'
 
-  export const DynamicScroller: DefineComponent<any, any, any>
-  export const DynamicScrollerItem: DefineComponent<any, any, any>
+  interface DynamicScrollerSlotProps {
+    item: any
+    index: number
+    active: boolean
+  }
+
+  interface DynamicScrollerExposed {
+    scrollToItem(index: number): void
+  }
+
+  export const DynamicScroller: DefineComponent<
+    {
+      items?: any[]
+      minItemSize?: number
+      keyField?: string
+    },
+    DynamicScrollerExposed,
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    string,
+    {},
+    {},
+    {},
+    SlotsType<{
+      default: DynamicScrollerSlotProps
+    }>
+  >
+
+  export const DynamicScrollerItem: DefineComponent<{
+    item?: any
+    active?: boolean
+    sizeDependencies?: any[]
+  }>
+
   export const RecycleScroller: DefineComponent<any, any, any>
 }
