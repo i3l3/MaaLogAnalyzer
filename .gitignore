@@ -35,6 +35,12 @@ src-tauri/gen
 *.deb
 *.rpm
 *.AppImage
+*.vsix
+
+# VSCode extension
+src-vscode/dist
+src-vscode/webview
+src-vscode/vsix
 
 
 
