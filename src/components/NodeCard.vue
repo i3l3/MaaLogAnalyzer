@@ -145,17 +145,14 @@ const actionButtonType = computed(() => {
       size="small"
       :bordered="true"
     >
-      <!-- Header: 节点名称按钮 + PipelineNode 标签 -->
+      <!-- Header: 节点名称按钮 -->
       <template #header>
-        <n-flex justify="space-between" align="center">
-          <n-button
-            size="small"
-            @click="handleNodeClick"
-          >
-            {{ node.name }}
-          </n-button>
-          <n-tag size="small">PipelineNode</n-tag>
-        </n-flex>
+        <n-button
+          size="small"
+          @click="handleNodeClick"
+        >
+          {{ node.name }}
+        </n-button>
       </template>
 
       <!-- Content: 执行流程 Recognition → Action → Next List -->
