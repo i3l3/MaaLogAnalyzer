@@ -191,6 +191,7 @@ function isNeededFile(filePath: string): boolean {
   const name = lower.substring(lower.lastIndexOf('/') + 1)
   if (name === 'maa.log' || name === 'maa.bak.log') return true
   if (lower.includes('/on_error/') && lower.endsWith('.png')) return true
+  if (lower.includes('/vision/') && lower.endsWith('.jpg')) return true
   return false
 }
 
@@ -221,6 +222,17 @@ function parseErrorImageKey(fileName: string): string | null {
   const [, timestamp, ms, nodeName] = match
   const paddedMs = ms.padEnd(3, '0')
   return `${timestamp}.${paddedMs}_${nodeName}`
+}
+
+/** 解析 vision 截图文件名为标准化 key */
+function parseVisionImageKey(fileName: string): string | null {
+  const match = fileName.match(
+    /^(\d{4}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2})\.(\d{1,3})_(.+_\d{9,})\.jpg$/i,
+  )
+  if (!match) return null
+  const [, timestamp, ms, rest] = match
+  const paddedMs = ms.padEnd(3, '0')
+  return `${timestamp}.${paddedMs}_${rest}`
 }
 
 /** 处理 ZIP 文件：Node.js 侧解压 */
@@ -271,6 +283,11 @@ async function handleZipFile(uri: vscode.Uri): Promise<void> {
     // 提取 on_error 截图转为 base64
     const errorImages: { key: string; base64: string }[] = []
     const onErrorPrefix = joinZipPath(basePath, 'on_error/').toLowerCase()
+
+    // 提取 vision 调试截图转为 base64
+    const visionImages: { key: string; base64: string }[] = []
+    const visionPrefix = joinZipPath(basePath, 'vision/').toLowerCase()
+
     for (const p of paths) {
       const normalized = p.replace(/\\/g, '/')
       const lower = normalized.toLowerCase()
@@ -281,13 +298,27 @@ async function handleZipFile(uri: vscode.Uri): Promise<void> {
           const base64 = Buffer.from(files[p]).toString('base64')
           errorImages.push({ key, base64 })
         }
+      } else if (lower.startsWith(visionPrefix) && lower.endsWith('.jpg')) {
+        const fileName = normalized.substring(normalized.lastIndexOf('/') + 1)
+        const key = parseVisionImageKey(fileName)
+        if (key) {
+          const base64 = Buffer.from(files[p]).toString('base64')
+          // 同一 key 覆盖（取最后出现的）
+          const existing = visionImages.findIndex(v => v.key === key)
+          if (existing >= 0) {
+            visionImages[existing].base64 = base64
+          } else {
+            visionImages.push({ key, base64 })
+          }
+        }
       }
     }
 
     currentPanel?.webview.postMessage({
       type: 'loadZipFile',
       content,
-      errorImages
+      errorImages,
+      visionImages
     })
   } catch (error) {
     vscode.window.showErrorMessage(`解压 ZIP 文件失败: ${error}`)

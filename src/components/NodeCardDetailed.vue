@@ -72,6 +72,12 @@ const emit = defineEmits<{
             {{ item.name }}
           </n-button>
           <n-image
+            v-if="item.attempt?.vision_image"
+            :src="convertFileSrc(item.attempt.vision_image)"
+            width="200"
+            style="border-radius: 4px"
+          />
+          <n-image
             v-if="item.attempt?.error_image"
             :src="convertFileSrc(item.attempt.error_image)"
             width="200"
@@ -104,6 +110,12 @@ const emit = defineEmits<{
             </template>
 
             <n-flex vertical style="gap: 12px">
+              <n-image
+                v-if="item.attempt?.vision_image"
+                :src="convertFileSrc(item.attempt.vision_image)"
+                width="200"
+                style="border-radius: 4px"
+              />
               <n-image
                 v-if="item.attempt?.error_image"
                 :src="convertFileSrc(item.attempt.error_image)"
@@ -148,6 +160,12 @@ const emit = defineEmits<{
                 Show
               </n-button>
             </n-flex>
+            <n-image
+              v-if="item.attempt?.vision_image"
+              :src="convertFileSrc(item.attempt.vision_image)"
+              width="200"
+              style="border-radius: 4px"
+            />
             <n-image
               v-if="item.attempt?.error_image"
               :src="convertFileSrc(item.attempt.error_image)"

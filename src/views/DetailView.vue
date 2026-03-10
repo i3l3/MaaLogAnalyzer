@@ -216,6 +216,18 @@ const copyToClipboard = (text: string) => {
             </n-descriptions-item>
           </n-descriptions>
 
+          <!-- 调试截图 (vision) -->
+          <div v-if="(currentAttempt as any)?.vision_image" style="margin-top: 12px">
+            <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">调试截图</n-text>
+            <img :src="convertFileSrc((currentAttempt as any).vision_image)" style="max-width: 100%; border-radius: 4px" alt="调试截图" />
+          </div>
+
+          <!-- 错误截图 -->
+          <div v-if="(currentAttempt as any)?.error_image" style="margin-top: 12px">
+            <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">错误截图</n-text>
+            <img :src="convertFileSrc((currentAttempt as any).error_image)" style="max-width: 100%; border-radius: 4px" alt="错误截图" />
+          </div>
+
           <!-- 原始识别数据 (折叠) -->
           <n-collapse style="margin-top: 16px" :default-expanded-names="rawJsonDefaultExpanded">
             <n-collapse-item title="原始识别数据" name="reco-json">

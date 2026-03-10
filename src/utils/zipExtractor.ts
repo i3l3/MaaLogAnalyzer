@@ -16,6 +16,8 @@ function isNeededFile(path: string): boolean {
   if (name === 'maa.log' || name === 'maa.bak.log') return true
   // on_error 截图
   if (lower.includes('/on_error/') && lower.endsWith('.png')) return true
+  // vision 调试截图
+  if (lower.includes('/vision/') && lower.endsWith('.jpg')) return true
   return false
 }
 
@@ -26,7 +28,7 @@ function isNeededFile(path: string): boolean {
  */
 export async function extractZipContent(
   file: File,
-): Promise<{ content: string; errorImages: Map<string, string> } | null> {
+): Promise<{ content: string; errorImages: Map<string, string>; visionImages: Map<string, string> } | null> {
   const buffer = await file.arrayBuffer()
   const zipData = new Uint8Array(buffer)
 
@@ -70,7 +72,10 @@ export async function extractZipContent(
   // 读取 on_error 截图
   const errorImages = extractErrorImages(files, paths, basePath)
 
-  return { content, errorImages }
+  // 读取 vision 调试截图
+  const visionImages = extractVisionImages(files, paths, basePath)
+
+  return { content, errorImages, visionImages }
 }
 
 /**
@@ -141,6 +146,58 @@ function extractErrorImages(
         const url = URL.createObjectURL(
           new Blob([data.slice().buffer as ArrayBuffer], { type: 'image/png' }),
         )
+        imageMap.set(key, url)
+      }
+    }
+  }
+
+  return imageMap
+}
+
+/**
+ * 解析 vision 文件名为标准化 key
+ * 格式: YYYY.MM.DD-HH.MM.SS.ms_NodeName_RecoId.jpg
+ * 返回: YYYY.MM.DD-HH.MM.SS.ms_NodeName_RecoId（毫秒补齐3位）
+ * 没有 reco_id 的文件返回 null
+ */
+function parseVisionImageKey(fileName: string): string | null {
+  // 匹配: 时间戳.毫秒_节点名_RecoId.jpg
+  const match = fileName.match(
+    /^(\d{4}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2})\.(\d{1,3})_(.+_\d{9,})\.jpg$/i,
+  )
+  if (!match) return null
+  const [, timestamp, ms, rest] = match
+  const paddedMs = ms.padEnd(3, '0')
+  return `${timestamp}.${paddedMs}_${rest}`
+}
+
+/**
+ * 提取 vision 目录下的 JPG 调试截图
+ * key 格式: YYYY.MM.DD-HH.MM.SS.ms_NodeName_RecoId
+ * 同一 key 有多张图时，取最后一张
+ */
+function extractVisionImages(
+  files: Record<string, Uint8Array>,
+  paths: string[],
+  basePath: string,
+): Map<string, string> {
+  const imageMap = new Map<string, string>()
+  const visionPrefix = joinPath(basePath, 'vision/').toLowerCase()
+
+  for (const p of paths) {
+    const normalized = p.replace(/\\/g, '/')
+    const lower = normalized.toLowerCase()
+    if (lower.startsWith(visionPrefix) && lower.endsWith('.jpg')) {
+      const fileName = normalized.substring(normalized.lastIndexOf('/') + 1)
+      const key = parseVisionImageKey(fileName)
+      if (key != null) {
+        const data = files[p]
+        const url = URL.createObjectURL(
+          new Blob([data.slice().buffer as ArrayBuffer], { type: 'image/jpeg' }),
+        )
+        // 同一 key 覆盖（释放前一个 blob URL）
+        const prev = imageMap.get(key)
+        if (prev) URL.revokeObjectURL(prev)
         imageMap.set(key, url)
       }
     }

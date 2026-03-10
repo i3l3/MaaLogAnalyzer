@@ -53,6 +53,7 @@ export interface RecognitionAttempt {
   reco_details?: RecognitionDetail
   nested_nodes?: RecognitionAttempt[]
   error_image?: string
+  vision_image?: string
 }
 
 // 嵌套动作节点组（custom action 产生的子任务）

@@ -274,9 +274,55 @@ async function readErrorImages(debugPath: string): Promise<Map<string, string>> 
 }
 
 /**
+ * 解析 vision 文件名为标准化 key
+ * 格式: YYYY.MM.DD-HH.MM.SS.ms_NodeName_RecoId.jpg
+ * 返回: YYYY.MM.DD-HH.MM.SS.ms_NodeName_RecoId（毫秒补齐3位）
+ */
+function parseVisionImageKey(fileName: string): string | null {
+  const match = fileName.match(
+    /^(\d{4}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2})\.(\d{1,3})_(.+_\d{9,})\.jpg$/i,
+  )
+  if (!match) return null
+  const [, timestamp, ms, rest] = match
+  const paddedMs = ms.padEnd(3, '0')
+  return `${timestamp}.${paddedMs}_${rest}`
+}
+
+/**
+ * 读取 vision 文件夹中的调试截图（Tauri）
+ */
+async function readVisionImages(debugPath: string): Promise<Map<string, string>> {
+  const imageMap = new Map<string, string>()
+  try {
+    const { readDir, exists } = await import('@tauri-apps/plugin-fs')
+
+    const visionPath = `${debugPath}\\vision`
+    if (!(await exists(visionPath))) {
+      return imageMap
+    }
+
+    const entries = await readDir(visionPath)
+    for (const entry of entries) {
+      if (!entry.isDirectory && entry.name.toLowerCase().endsWith('.jpg')) {
+        const key = parseVisionImageKey(entry.name)
+        if (key != null) {
+          const fullPath = `${visionPath}\\${entry.name}`
+          // 同一 key 覆盖（取最后出现的文件）
+          imageMap.set(key, fullPath)
+        }
+      }
+    }
+    console.log('[vision] 总共加载调试截图数:', imageMap.size)
+  } catch (error) {
+    console.warn('[vision] 读取调试截图失败:', error)
+  }
+  return imageMap
+}
+
+/**
  * 打开文件夹并读取日志
  */
-export async function openFolderDialog(): Promise<{ content: string; errorImages: Map<string, string> } | null> {
+export async function openFolderDialog(): Promise<{ content: string; errorImages: Map<string, string>; visionImages: Map<string, string> } | null> {
   if (isTauri()) {
     return await openFolderDialogTauri()
   } else {
@@ -287,7 +333,7 @@ export async function openFolderDialog(): Promise<{ content: string; errorImages
 /**
  * Tauri 版本：打开文件夹并读取日志
  */
-async function openFolderDialogTauri(): Promise<{ content: string; errorImages: Map<string, string> } | null> {
+async function openFolderDialogTauri(): Promise<{ content: string; errorImages: Map<string, string>; visionImages: Map<string, string> } | null> {
 
   try {
     const { open } = await import('@tauri-apps/plugin-dialog')
@@ -352,7 +398,10 @@ async function openFolderDialogTauri(): Promise<{ content: string; errorImages: 
     // 读取截图
     const errorImages = await readErrorImages(debugPath)
 
-    return { content, errorImages }
+    // 读取 vision 调试截图
+    const visionImages = await readVisionImages(debugPath)
+
+    return { content, errorImages, visionImages }
   } catch (error) {
     console.error('[文件夹] 打开失败:', error)
     alert('打开文件夹失败: ' + error)
@@ -418,9 +467,38 @@ async function readErrorImagesWeb(debugHandle: FileSystemDirectoryHandle): Promi
 }
 
 /**
+ * Web 版本：读取 vision 文件夹中的调试截图
+ */
+async function readVisionImagesWeb(debugHandle: FileSystemDirectoryHandle): Promise<Map<string, string>> {
+  const imageMap = new Map<string, string>()
+  try {
+    const visionHandle = await debugHandle.getDirectoryHandle('vision')
+    console.log('[vision] 找到 vision 文件夹')
+
+    for await (const entry of visionHandle.values()) {
+      if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.jpg')) {
+        const key = parseVisionImageKey(entry.name)
+        if (key != null) {
+          const file = await (entry as FileSystemFileHandle).getFile()
+          const url = URL.createObjectURL(file)
+          // 同一 key 覆盖（释放前一个 blob URL）
+          const prev = imageMap.get(key)
+          if (prev) URL.revokeObjectURL(prev)
+          imageMap.set(key, url)
+        }
+      }
+    }
+    console.log('[vision] 总共加载调试截图数:', imageMap.size)
+  } catch (error) {
+    console.log('[vision] vision 文件夹不存在')
+  }
+  return imageMap
+}
+
+/**
  * Web 版本：打开文件夹并读取日志
  */
-async function openFolderDialogWeb(): Promise<{ content: string; errorImages: Map<string, string> } | null> {
+async function openFolderDialogWeb(): Promise<{ content: string; errorImages: Map<string, string>; visionImages: Map<string, string> } | null> {
   try {
     if (!('showDirectoryPicker' in window)) {
       alert('您的浏览器不支持文件夹选择功能，请使用 Chrome/Edge 等现代浏览器')
@@ -489,7 +567,10 @@ async function openFolderDialogWeb(): Promise<{ content: string; errorImages: Ma
     // 读取截图
     const errorImages = await readErrorImagesWeb(debugHandle)
 
-    return { content, errorImages }
+    // 读取 vision 调试截图
+    const visionImages = await readVisionImagesWeb(debugHandle)
+
+    return { content, errorImages, visionImages }
   } catch (error) {
     console.error('[文件夹] 打开失败:', error)
     if ((error as Error).name === 'AbortError') {

@@ -89,12 +89,21 @@ export class LogParser {
   private taskProcessMap = new Map<number, string>()
   private taskThreadMap = new Map<number, string>()
   private errorImages = new Map<string, string>()
+  private visionImages = new Map<string, string>()
 
   /**
    * 设置错误截图映射
    */
   setErrorImages(images: Map<string, string>): void {
     this.errorImages = images
+  }
+
+  /**
+   * 设置 vision 调试截图映射
+   * key 格式: YYYY.MM.DD-HH.MM.SS.ms_NodeName_RecoId
+   */
+  setVisionImages(images: Map<string, string>): void {
+    this.visionImages = images
   }
 
   /**
@@ -303,7 +312,8 @@ export class LogParser {
               status: message === 'Node.Recognition.Succeeded' ? 'success' : 'failed',
               reco_details: details.reco_details ? markRaw(details.reco_details) : undefined,
               nested_nodes: nestedRecognitionNodes.length > 0 ? nestedRecognitionNodes.slice() : undefined,
-              error_image: this.findRecognitionImage(event.timestamp, details.name || '')
+              error_image: this.findRecognitionImage(event.timestamp, details.name || ''),
+              vision_image: this.findVisionImage(event.timestamp, details.name || '', details.reco_id)
             })
             nestedRecognitionNodes.length = 0
             break
@@ -368,7 +378,8 @@ export class LogParser {
             timestamp: this.stringPool.intern(event.timestamp),
             status: message === 'Node.Recognition.Succeeded' ? 'success' : 'failed',
             reco_details: details.reco_details ? markRaw(details.reco_details) : undefined,
-            error_image: this.findRecognitionImage(event.timestamp, details.name || '')
+            error_image: this.findRecognitionImage(event.timestamp, details.name || ''),
+            vision_image: this.findVisionImage(event.timestamp, details.name || '', details.reco_id)
           })
           break
 
@@ -393,7 +404,8 @@ export class LogParser {
             status: message === 'Node.RecognitionNode.Succeeded' ? 'success' : 'failed',
             reco_details: details.reco_details ? markRaw(details.reco_details) : undefined,
             nested_nodes: nestedRecognitions.length > 0 ? nestedRecognitions : undefined,
-            error_image: this.findRecognitionImage(event.timestamp, details.name || '')
+            error_image: this.findRecognitionImage(event.timestamp, details.name || ''),
+            vision_image: this.findVisionImage(event.timestamp, details.name || '', details.reco_details?.reco_id || details.node_id)
           })
           break
         }
@@ -461,6 +473,25 @@ export class LogParser {
     const suffix = `_${nodeName}`
 
     for (const [key, path] of this.errorImages.entries()) {
+      if (key.includes(`${secondsOnly}.`) && key.endsWith(suffix)) {
+        return path
+      }
+    }
+    return undefined
+  }
+
+  /**
+   * 查找 vision 调试截图（秒级时间戳 + 节点名 + reco_id 三重匹配）
+   * key 格式: YYYY.MM.DD-HH.MM.SS.ms_NodeName_RecoId
+   */
+  private findVisionImage(timestamp: string, nodeName: string, recoId: number): string | undefined {
+    if (this.visionImages.size === 0) return undefined
+
+    // 2026-03-08 13:12:30.216 -> 2026.03.08-13.12.30
+    const secondsOnly = timestamp.replace(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})\..*/, '$1.$2.$3-$4.$5.$6')
+    const suffix = `_${nodeName}_${recoId}`
+
+    for (const [key, path] of this.visionImages.entries()) {
       if (key.includes(`${secondsOnly}.`) && key.endsWith(suffix)) {
         return path
       }
