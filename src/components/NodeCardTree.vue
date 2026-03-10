@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { NButton, NText } from 'naive-ui'
+import { NButton, NFlex, NText } from 'naive-ui'
 import { CheckCircleOutlined, CloseCircleOutlined } from '@vicons/antd'
 import type { NodeInfo, MergedRecognitionItem } from '../types'
 
 const props = defineProps<{
   node: NodeInfo
   mergedRecognitionList: MergedRecognitionItem[]
+  recognitionExpanded: boolean
+  actionExpanded: boolean
+  isExpanded: (attemptIndex: number) => boolean
 }>()
 
 const emit = defineEmits<{
@@ -15,6 +18,9 @@ const emit = defineEmits<{
   'select-recognition': [node: NodeInfo, attemptIndex: number]
   'select-nested': [node: NodeInfo, attemptIndex: number, nestedIndex: number]
   'select-nested-action': [node: NodeInfo, actionIndex: number, nestedIndex: number]
+  'toggle-recognition': []
+  'toggle-action': []
+  'toggle-nested': [attemptIndex: number]
 }>()
 
 // 扁平化的 nested action 节点列表
@@ -37,50 +43,83 @@ const flatNestedActions = computed(() => {
   <div class="tree-view">
     <!-- Recognition 树 -->
     <template v-if="mergedRecognitionList.length > 0">
-      <n-text depth="3" style="font-size: 12px; display: block; margin-bottom: 2px">Recognition</n-text>
-      <ul class="tree-list">
+      <n-flex align="center" style="gap: 4px; margin-bottom: 2px">
+        <span
+          class="tree-toggle"
+          :class="{ 'tree-toggle-collapsed': !recognitionExpanded }"
+          @click="emit('toggle-recognition')"
+        />
+        <n-text depth="3" style="font-size: 12px; cursor: pointer" @click="emit('toggle-recognition')">Recognition</n-text>
+      </n-flex>
+      <ul v-if="recognitionExpanded" class="tree-list">
         <li
           v-for="(item, idx) in mergedRecognitionList"
           :key="`tree-reco-${idx}`"
           class="tree-item"
         >
-          <!-- 识别候选 -->
-          <n-button
-            v-if="item.status !== 'not-recognized'"
-            text
-            size="tiny"
-            :type="item.status === 'success' ? 'success' : 'warning'"
-            @click="emit('select-recognition', node, item.attemptIndex!)"
-          >
-            <template #icon>
-              <check-circle-outlined v-if="item.status === 'success'" />
-              <close-circle-outlined v-else />
-            </template>
-            {{ item.name }}
-          </n-button>
-          <n-text v-else depth="3" style="font-size: 12px; opacity: 0.5">{{ item.name }}</n-text>
+          <!-- 未识别的节点 -->
+          <n-text v-if="item.status === 'not-recognized'" depth="3" style="font-size: 12px; opacity: 0.5">{{ item.name }}</n-text>
 
-          <!-- 嵌套识别 -->
-          <ul v-if="item.attempt?.nested_nodes && item.attempt.nested_nodes.length > 0" class="tree-list">
-            <li
-              v-for="(nested, nestedIdx) in item.attempt.nested_nodes"
-              :key="`tree-nested-${idx}-${nestedIdx}`"
-              class="tree-item"
+          <!-- 已识别、无嵌套 -->
+          <template v-else-if="!item.hasNestedNodes">
+            <n-button
+              text
+              size="tiny"
+              :type="item.status === 'success' ? 'success' : 'warning'"
+              @click="emit('select-recognition', node, item.attemptIndex!)"
             >
+              <template #icon>
+                <check-circle-outlined v-if="item.status === 'success'" />
+                <close-circle-outlined v-else />
+              </template>
+              {{ item.name }}
+            </n-button>
+          </template>
+
+          <!-- 已识别、有嵌套 -->
+          <template v-else>
+            <n-flex align="center" style="gap: 4px">
+              <span
+                class="tree-toggle"
+                :class="{ 'tree-toggle-collapsed': !isExpanded(item.attemptIndex!) }"
+                @click="emit('toggle-nested', item.attemptIndex!)"
+              />
               <n-button
                 text
                 size="tiny"
-                :type="nested.status === 'success' ? 'success' : 'warning'"
-                @click="emit('select-nested', node, item.attemptIndex!, nestedIdx)"
+                :type="item.status === 'success' ? 'success' : 'warning'"
+                @click="emit('select-recognition', node, item.attemptIndex!)"
               >
                 <template #icon>
-                  <check-circle-outlined v-if="nested.status === 'success'" />
+                  <check-circle-outlined v-if="item.status === 'success'" />
                   <close-circle-outlined v-else />
                 </template>
-                {{ nested.name }}
+                {{ item.name }}
               </n-button>
-            </li>
-          </ul>
+            </n-flex>
+
+            <!-- 嵌套识别 -->
+            <ul v-if="isExpanded(item.attemptIndex!)" class="tree-list">
+              <li
+                v-for="(nested, nestedIdx) in item.attempt!.nested_nodes"
+                :key="`tree-nested-${idx}-${nestedIdx}`"
+                class="tree-item"
+              >
+                <n-button
+                  text
+                  size="tiny"
+                  :type="nested.status === 'success' ? 'success' : 'warning'"
+                  @click="emit('select-nested', node, item.attemptIndex!, nestedIdx)"
+                >
+                  <template #icon>
+                    <check-circle-outlined v-if="nested.status === 'success'" />
+                    <close-circle-outlined v-else />
+                  </template>
+                  {{ nested.name }}
+                </n-button>
+              </li>
+            </ul>
+          </template>
         </li>
       </ul>
     </template>
@@ -88,23 +127,31 @@ const flatNestedActions = computed(() => {
     <!-- Action 树 -->
     <template v-if="node.action_details">
       <div style="margin-top: 4px">
-        <n-text depth="3" style="font-size: 12px">Action: </n-text>
-        <n-button
-          text
-          size="tiny"
-          :type="node.action_details.success ? 'success' : 'error'"
-          @click="emit('select-action', node)"
-        >
-          <template #icon>
-            <check-circle-outlined v-if="node.action_details.success" />
-            <close-circle-outlined v-else />
-          </template>
-          {{ node.action_details.name }}
-        </n-button>
+        <n-flex align="center" style="gap: 4px">
+          <span
+            v-if="flatNestedActions.length > 0"
+            class="tree-toggle"
+            :class="{ 'tree-toggle-collapsed': !actionExpanded }"
+            @click="emit('toggle-action')"
+          />
+          <n-text depth="3" style="font-size: 12px">Action: </n-text>
+          <n-button
+            text
+            size="tiny"
+            :type="node.action_details.success ? 'success' : 'error'"
+            @click="emit('select-action', node)"
+          >
+            <template #icon>
+              <check-circle-outlined v-if="node.action_details.success" />
+              <close-circle-outlined v-else />
+            </template>
+            {{ node.action_details.name }}
+          </n-button>
+        </n-flex>
       </div>
 
       <!-- 嵌套 action 节点 -->
-      <ul v-if="flatNestedActions.length > 0" class="tree-list">
+      <ul v-if="actionExpanded && flatNestedActions.length > 0" class="tree-list">
         <li
           v-for="(item, idx) in flatNestedActions"
           :key="`tree-action-${idx}`"
@@ -131,6 +178,23 @@ const flatNestedActions = computed(() => {
 <style scoped>
 .tree-view {
   font-size: 13px;
+}
+
+.tree-toggle {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 5px 0 5px 8px;
+  border-color: transparent transparent transparent currentColor;
+  cursor: pointer;
+  transition: transform 0.2s;
+  transform: rotate(90deg);
+  flex-shrink: 0;
+}
+
+.tree-toggle-collapsed {
+  transform: rotate(0deg);
 }
 
 .tree-list {

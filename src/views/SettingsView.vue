@@ -37,7 +37,7 @@ const handleReset = () => {
         </n-radio-group>
       </n-form-item>
 
-      <template v-if="settings.displayMode === 'detailed'">
+      <template v-if="settings.displayMode === 'detailed' || settings.displayMode === 'tree'">
         <n-form-item label="默认折叠根部识别列表">
           <n-switch v-model:value="settings.defaultCollapseRecognition" />
         </n-form-item>

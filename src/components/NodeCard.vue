@@ -185,11 +185,17 @@ const actionButtonType = computed<ButtonType>(() => {
           v-else
           :node="node"
           :merged-recognition-list="mergedRecognitionList"
+          :recognition-expanded="recognitionExpanded"
+          :action-expanded="actionExpanded"
+          :is-expanded="isExpanded"
           @select-node="emit('select-node', $event)"
           @select-action="emit('select-action', $event)"
           @select-recognition="(n, i) => emit('select-recognition', n, i)"
           @select-nested="(n, ai, ni) => emit('select-nested', n, ai, ni)"
           @select-nested-action="(n, ai, ni) => emit('select-nested-action', n, ai, ni)"
+          @toggle-recognition="recognitionExpanded = !recognitionExpanded"
+          @toggle-action="actionExpanded = !actionExpanded"
+          @toggle-nested="toggleNestedNodes"
         />
       </n-flex>
     </n-card>
