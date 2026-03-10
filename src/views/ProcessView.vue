@@ -29,6 +29,7 @@ const emit = defineEmits<{
   'select-node': [node: NodeInfo]
   'select-recognition': [node: NodeInfo, attemptIndex: number]
   'select-nested': [node: NodeInfo, attemptIndex: number, nestedIndex: number]
+  'select-nested-action': [node: NodeInfo, actionIndex: number, nestedIndex: number]
   'file-loading-start': []
   'file-loading-end': []
 }>()
@@ -532,6 +533,11 @@ const handleRecognitionClick = (node: NodeInfo, attemptIndex: number) => {
 const handleNestedClick = (node: NodeInfo, attemptIndex: number, nestedIndex: number) => {
   emit('select-nested', node, attemptIndex, nestedIndex)
 }
+
+// 选择嵌套动作节点
+const handleNestedActionClick = (node: NodeInfo, actionIndex: number, nestedIndex: number) => {
+  emit('select-nested-action', node, actionIndex, nestedIndex)
+}
 </script>
 
 <template>
@@ -886,6 +892,7 @@ const handleNestedClick = (node: NodeInfo, attemptIndex: number, nestedIndex: nu
                             @select-node="handleNodeClick"
                             @select-recognition="handleRecognitionClick"
                             @select-nested="handleNestedClick"
+                            @select-nested-action="handleNestedActionClick"
                           />
                         </div>
                       </DynamicScrollerItem>

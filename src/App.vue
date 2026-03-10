@@ -71,6 +71,8 @@ const selectedTask = ref<TaskInfo | null>(null)
 const selectedNode = ref<NodeInfo | null>(null)
 const selectedRecognitionIndex = ref<number | null>(null)
 const selectedNestedIndex = ref<number | null>(null)
+const selectedActionIndex = ref<number | null>(null)
+const selectedNestedActionIndex = ref<number | null>(null)
 const loading = ref(false)
 const parseProgress = ref(0)
 const showParsingModal = ref(false)
@@ -193,6 +195,8 @@ const handleSelectNode = (node: NodeInfo) => {
   selectedNode.value = node
   selectedRecognitionIndex.value = null
   selectedNestedIndex.value = null
+  selectedActionIndex.value = null
+  selectedNestedActionIndex.value = null
 }
 
 // 选择识别尝试
@@ -200,6 +204,8 @@ const handleSelectRecognition = (node: NodeInfo, attemptIndex: number) => {
   selectedNode.value = node
   selectedRecognitionIndex.value = attemptIndex
   selectedNestedIndex.value = null
+  selectedActionIndex.value = null
+  selectedNestedActionIndex.value = null
 }
 
 // 选择嵌套节点
@@ -207,6 +213,17 @@ const handleSelectNested = (node: NodeInfo, attemptIndex: number, nestedIndex: n
   selectedNode.value = node
   selectedRecognitionIndex.value = attemptIndex
   selectedNestedIndex.value = nestedIndex
+  selectedActionIndex.value = null
+  selectedNestedActionIndex.value = null
+}
+
+// 选择嵌套动作节点
+const handleSelectNestedAction = (node: NodeInfo, actionIndex: number, nestedIndex: number) => {
+  selectedNode.value = node
+  selectedRecognitionIndex.value = null
+  selectedNestedIndex.value = null
+  selectedActionIndex.value = actionIndex
+  selectedNestedActionIndex.value = nestedIndex
 }
 
 // 过滤任务列表
@@ -462,6 +479,7 @@ if (typeof window !== 'undefined') {
               @select-node="handleSelectNode"
               @select-recognition="handleSelectRecognition"
               @select-nested="handleSelectNested"
+              @select-nested-action="handleSelectNestedAction"
               @file-loading-start="handleFileLoadingStart"
               @file-loading-end="handleFileLoadingEnd"
             />
@@ -489,6 +507,8 @@ if (typeof window !== 'undefined') {
                 :selected-task="selectedTask"
                 :selected-recognition-index="selectedRecognitionIndex"
                 :selected-nested-index="selectedNestedIndex"
+                :selected-action-index="selectedActionIndex"
+                :selected-nested-action-index="selectedNestedActionIndex"
                 style="height: 100%"
               />
             </n-card>

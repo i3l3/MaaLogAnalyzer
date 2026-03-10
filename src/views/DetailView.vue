@@ -20,6 +20,8 @@ const props = defineProps<{
   selectedTask?: TaskInfo | null
   selectedRecognitionIndex?: number | null
   selectedNestedIndex?: number | null
+  selectedActionIndex?: number | null
+  selectedNestedActionIndex?: number | null
 }>()
 
 // 调试：监听节点变化
@@ -48,6 +50,15 @@ const statusInfo = computed(() => {
 // 当前选中的识别尝试（用于获取时间戳等元信息）
 const currentAttempt = computed(() => {
   if (!props.selectedNode) return null
+
+  // 如果选中了嵌套动作节点
+  if (props.selectedActionIndex !== null && props.selectedActionIndex !== undefined &&
+      props.selectedNestedActionIndex !== null && props.selectedNestedActionIndex !== undefined) {
+    const nestedActionGroup = props.selectedNode.nested_action_nodes?.[props.selectedActionIndex]
+    const nestedAction = nestedActionGroup?.nested_actions?.[props.selectedNestedActionIndex]
+    return nestedAction || null
+  }
+
   if (props.selectedRecognitionIndex === null || props.selectedRecognitionIndex === undefined) return null
 
   const attempt = props.selectedNode.recognition_attempts[props.selectedRecognitionIndex]
@@ -62,6 +73,14 @@ const currentAttempt = computed(() => {
 // 当前显示的识别详情（可能是选中的识别尝试、嵌套节点，或节点的最终识别）
 const currentRecognition = computed(() => {
   if (!props.selectedNode) return null
+
+  // 如果选中了嵌套动作节点
+  if (props.selectedActionIndex !== null && props.selectedActionIndex !== undefined &&
+      props.selectedNestedActionIndex !== null && props.selectedNestedActionIndex !== undefined) {
+    const nestedActionGroup = props.selectedNode.nested_action_nodes?.[props.selectedActionIndex]
+    const nestedAction = nestedActionGroup?.nested_actions?.[props.selectedNestedActionIndex]
+    return nestedAction?.reco_details || null
+  }
 
   // 如果选中了特定的识别尝试
   if (props.selectedRecognitionIndex !== null && props.selectedRecognitionIndex !== undefined) {
@@ -88,17 +107,49 @@ const hasRecognition = computed(() => {
 
 // 是否有动作详情（节点最终动作，与当前识别尝试解耦）
 const hasAction = computed(() => {
+  // 如果选中了嵌套动作节点，检查是否有动作详情
+  if (props.selectedActionIndex !== null && props.selectedActionIndex !== undefined &&
+      props.selectedNestedActionIndex !== null && props.selectedNestedActionIndex !== undefined) {
+    const nestedActionGroup = props.selectedNode?.nested_action_nodes?.[props.selectedActionIndex]
+    const nestedAction = nestedActionGroup?.nested_actions?.[props.selectedNestedActionIndex]
+    return !!nestedAction?.action_details
+  }
   return !!props.selectedNode?.action_details
 })
 
-// 是否选中了特定的识别尝试
+// 当前动作详情
+const currentActionDetails = computed(() => {
+  if (!props.selectedNode) return null
+
+  // 如果选中了嵌套动作节点，返回嵌套动作的动作详情
+  if (props.selectedActionIndex !== null && props.selectedActionIndex !== undefined &&
+      props.selectedNestedActionIndex !== null && props.selectedNestedActionIndex !== undefined) {
+    const nestedActionGroup = props.selectedNode.nested_action_nodes?.[props.selectedActionIndex]
+    const nestedAction = nestedActionGroup?.nested_actions?.[props.selectedNestedActionIndex]
+    return nestedAction?.action_details || null
+  }
+
+  return props.selectedNode.action_details || null
+})
+
+// 是否选中了特定的识别尝试或嵌套动作节点
 const isRecognitionAttemptSelected = computed(() => {
-  return props.selectedRecognitionIndex !== null && props.selectedRecognitionIndex !== undefined
+  return (props.selectedRecognitionIndex !== null && props.selectedRecognitionIndex !== undefined) ||
+         (props.selectedActionIndex !== null && props.selectedActionIndex !== undefined &&
+          props.selectedNestedActionIndex !== null && props.selectedNestedActionIndex !== undefined)
 })
 
 // 当前选中的识别尝试是否成功
 const isCurrentRecognitionSuccess = computed(() => {
   if (!props.selectedNode || !isRecognitionAttemptSelected.value) return false
+
+  // 如果选中了嵌套动作节点
+  if (props.selectedActionIndex !== null && props.selectedActionIndex !== undefined &&
+      props.selectedNestedActionIndex !== null && props.selectedNestedActionIndex !== undefined) {
+    const nestedActionGroup = props.selectedNode.nested_action_nodes?.[props.selectedActionIndex]
+    const nestedAction = nestedActionGroup?.nested_actions?.[props.selectedNestedActionIndex]
+    return nestedAction?.status === 'success'
+  }
 
   const attempt = props.selectedNode.recognition_attempts[props.selectedRecognitionIndex!]
 
@@ -192,32 +243,32 @@ const copyToClipboard = (text: string) => {
         <n-card title="⚡ 动作详情" v-if="hasAction && isRecognitionAttemptSelected && isCurrentRecognitionSuccess">
           <n-descriptions :column="2" size="small" label-placement="left" bordered>
             <n-descriptions-item label="动作 ID">
-              {{ selectedNode.action_details?.action_id }}
+              {{ currentActionDetails?.action_id }}
             </n-descriptions-item>
 
             <n-descriptions-item label="动作类型">
-              <n-tag size="small" :type="selectedNode.action_details?.action === 'DoNothing' ? 'default' : 'primary'">
-                {{ selectedNode.action_details?.action || 'Unknown' }}
+              <n-tag size="small" :type="currentActionDetails?.action === 'DoNothing' ? 'default' : 'primary'">
+                {{ currentActionDetails?.action || 'Unknown' }}
               </n-tag>
             </n-descriptions-item>
 
             <n-descriptions-item label="节点名称">
-              {{ selectedNode.action_details?.name }}
+              {{ currentActionDetails?.name }}
             </n-descriptions-item>
 
             <n-descriptions-item label="执行结果">
-              <n-tag :type="selectedNode.action_details?.success ? 'success' : 'error'" size="small">
-                {{ selectedNode.action_details?.success ? '成功' : '失败' }}
+              <n-tag :type="currentActionDetails?.success ? 'success' : 'error'" size="small">
+                {{ currentActionDetails?.success ? '成功' : '失败' }}
               </n-tag>
             </n-descriptions-item>
 
             <n-descriptions-item label="执行时间">
-              {{ selectedNode.timestamp || '-' }}
+              {{ currentAttempt?.timestamp || '-' }}
             </n-descriptions-item>
 
-            <n-descriptions-item label="目标位置" :span="2" v-if="selectedNode.action_details?.box">
+            <n-descriptions-item label="目标位置" :span="2" v-if="currentActionDetails?.box">
               <n-text code>
-                [{{ selectedNode.action_details.box.join(', ') }}]
+                [{{ currentActionDetails.box.join(', ') }}]
               </n-text>
             </n-descriptions-item>
           </n-descriptions>
@@ -228,7 +279,7 @@ const copyToClipboard = (text: string) => {
               <template #header-extra>
                 <n-button
                   size="tiny"
-                  @click.stop="copyToClipboard(formatJson(selectedNode.action_details))"
+                  @click.stop="copyToClipboard(formatJson(currentActionDetails))"
                 >
                   <template #icon>
                     <n-icon><copy-outlined /></n-icon>
@@ -237,7 +288,7 @@ const copyToClipboard = (text: string) => {
                 </n-button>
               </template>
               <n-code
-                :code="formatJson(selectedNode.action_details)"
+                :code="formatJson(currentActionDetails)"
                 language="json"
                 :word-wrap="true"
                 style="max-height: 400px; overflow: auto; max-width: 100%"

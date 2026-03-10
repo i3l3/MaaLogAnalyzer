@@ -19,6 +19,7 @@ const emit = defineEmits<{
   'select-node': [node: NodeInfo]
   'select-recognition': [node: NodeInfo, attemptIndex: number]
   'select-nested': [node: NodeInfo, attemptIndex: number, nestedIndex: number]
+  'select-nested-action': [node: NodeInfo, actionIndex: number, nestedIndex: number]
 }>()
 
 // 跟踪哪些识别尝试的嵌套节点是展开的（使用 Map 优化性能）
@@ -473,6 +474,7 @@ const actionButtonType = computed(() => {
                         size="small"
                         :type="nested.status === 'success' ? 'success' : 'warning'"
                         ghost
+                        @click="emit('select-nested-action', node, idx, nestedIdx)"
                       >
                         <template #icon>
                           <check-circle-outlined v-if="nested.status === 'success'" />

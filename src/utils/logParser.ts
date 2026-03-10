@@ -448,7 +448,7 @@ export class LogParser {
     const recognitionAttempts: any[] = []
     // 临时存储嵌套的 RecognitionNode 事件
     const nestedNodes: any[] = []
-    // 临时存储嵌套的 ActionNode 事件
+    // 临时存储嵌套的 ActionNode 事件（子任务的节点）
     const nestedActionNodes: any[] = []
     // 临时存储当前节点的 NextList（在 PipelineNode.Starting 和 Succeeded 之间）
     let currentNextList: any[] = []
@@ -456,6 +456,8 @@ export class LogParser {
     const recognitionsByTaskId = new Map<number, any[]>()
     // 存储每个 task_id 的 Action 事件（用于嵌套节点）
     const actionsByTaskId = new Map<number, any[]>()
+    // 存储子任务的节点（按task_id分组）
+    const subTaskNodesByTaskId = new Map<number, any[]>()
 
     // 遍历任务范围内的事件，提取节点信息和识别历史
     for (const event of taskEvents) {
@@ -486,7 +488,8 @@ export class LogParser {
             timestamp: this.stringPool.intern(event.timestamp),
             status: message === 'Node.RecognitionNode.Succeeded' ? 'success' : 'failed',
             reco_details: details.reco_details ? markRaw(details.reco_details) : undefined,
-            nested_nodes: nestedRecognitions.length > 0 ? nestedRecognitions : undefined
+            nested_nodes: nestedRecognitions.length > 0 ? nestedRecognitions : undefined,
+            error_image: this.findRecognitionImage(event.timestamp, details.name || '')
           }
           nestedNodes.push(nestedNode)
 
@@ -575,6 +578,27 @@ export class LogParser {
         }
       }
 
+      // 收集子任务的节点（不同task_id的PipelineNode）
+      if ((message === 'Node.PipelineNode.Succeeded' || message === 'Node.PipelineNode.Failed')) {
+        const taskId = details.task_id
+
+        // 如果是子任务的节点，按task_id分组收集
+        if (taskId !== task.task_id) {
+          const subNode = {
+            node_id: details.node_id,
+            name: this.stringPool.intern(details.reco_details?.name || details.action_details?.name || details.name || ''),
+            timestamp: this.stringPool.intern(event.timestamp),
+            status: message === 'Node.PipelineNode.Succeeded' ? 'success' : 'failed',
+            reco_details: details.reco_details ? markRaw(details.reco_details) : undefined,
+            action_details: details.action_details ? markRaw(details.action_details) : undefined
+          }
+          if (!subTaskNodesByTaskId.has(taskId)) {
+            subTaskNodesByTaskId.set(taskId, [])
+          }
+          subTaskNodesByTaskId.get(taskId)!.push(subNode)
+        }
+      }
+
       // 当遇到 PipelineNode.Succeeded 或 Failed 时，创建节点并关联识别历史
       if ((message === 'Node.PipelineNode.Succeeded' || message === 'Node.PipelineNode.Failed')
           && details.task_id === task.task_id) {
@@ -589,6 +613,15 @@ export class LogParser {
           // 获取自上一个 PipelineNode 以来收集的所有识别尝试
           // （包括常规 Recognition 事件和嵌套的 RecognitionNode 事件）
           const nodeRecognitionAttempts = recognitionAttempts.slice()
+
+          // 将分组的子任务节点转换为嵌套动作节点格式
+          const subTaskActionNodes = Array.from(subTaskNodesByTaskId.entries()).map(([taskId, nodes]) => ({
+            task_id: taskId,
+            name: this.stringPool.intern(nodes[0]?.name || 'SubTask'),
+            timestamp: this.stringPool.intern(nodes[0]?.timestamp || ''),
+            status: nodes.every(n => n.status === 'success') ? 'success' : 'failed',
+            nested_actions: nodes
+          }))
 
           const node: NodeInfo = {
             node_id: nodeId,
@@ -605,7 +638,7 @@ export class LogParser {
               jump_back: item.jump_back || false
             })),
             recognition_attempts: nodeRecognitionAttempts,
-            nested_action_nodes: nestedActionNodes.length > 0 ? nestedActionNodes.slice() : undefined,
+            nested_action_nodes: subTaskActionNodes.length > 0 ? subTaskActionNodes.slice() : (nestedActionNodes.length > 0 ? nestedActionNodes.slice() : undefined),
             nested_recognition_in_action: nestedNodes.length > 0 ? nestedNodes.slice() : undefined,
             node_details: details.node_details ? markRaw(details.node_details) : undefined,
             error_image: this.findErrorImage(event.timestamp, nodeName)
@@ -619,6 +652,7 @@ export class LogParser {
         recognitionAttempts.length = 0
         nestedActionNodes.length = 0
         nestedNodes.length = 0
+        subTaskNodesByTaskId.clear()
       }
     }
 
