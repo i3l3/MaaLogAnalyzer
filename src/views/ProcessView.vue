@@ -427,14 +427,13 @@ const handleTauriOpen = async () => {
   try {
     // 动态导入 Tauri API
     const { open } = await import('@tauri-apps/plugin-dialog')
-    const { readTextFile } = await import('@tauri-apps/plugin-fs')
 
     // 打开文件选择对话框（不显示加载提示）
     const selected = await open({
       multiple: false,
       filters: [{
         name: 'Log Files',
-        extensions: ['log', 'jsonl', 'txt']
+        extensions: ['log', 'jsonl', 'txt', 'zip']
       }],
       directory: false,
       title: '选择日志文件'
@@ -446,10 +445,26 @@ const handleTauriOpen = async () => {
         fileLoading.value = true
         emit('file-loading-start')
 
-        const content = await readTextFile(selected)
+        if (selected.toLowerCase().endsWith('.zip')) {
+          // ZIP 文件：使用 Rust 侧原生解压
+          const { invoke } = await import('@tauri-apps/api/core')
+          const result = await invoke<{ content: string; error_images: Record<string, number[]> }>('extract_zip_log', { path: selected })
 
-        if (content) {
-          emit('upload-content', content)
+          // 将 error_images 字节数组转为 blob URL
+          const errorImages = new Map<string, string>()
+          for (const [key, bytes] of Object.entries(result.error_images)) {
+            const blob = new Blob([new Uint8Array(bytes)], { type: 'image/png' })
+            errorImages.set(key, URL.createObjectURL(blob))
+          }
+
+          emit('upload-content', result.content, errorImages)
+        } else {
+          const { readTextFile } = await import('@tauri-apps/plugin-fs')
+          const content = await readTextFile(selected)
+
+          if (content) {
+            emit('upload-content', content)
+          }
         }
       } finally {
         fileLoading.value = false
@@ -511,6 +526,23 @@ const handleVSCodeMessage = (event: MessageEvent) => {
   if (message.type === 'loadFile' && message.content) {
     emit('file-loading-start')
     emit('upload-content', message.content)
+    emit('file-loading-end')
+  } else if (message.type === 'loadZipFile' && message.content) {
+    emit('file-loading-start')
+    // 将 base64 图片转 blob URL
+    const errorImages = new Map<string, string>()
+    if (message.errorImages && Array.isArray(message.errorImages)) {
+      for (const { key, base64 } of message.errorImages) {
+        const binaryStr = atob(base64)
+        const bytes = new Uint8Array(binaryStr.length)
+        for (let i = 0; i < binaryStr.length; i++) {
+          bytes[i] = binaryStr.charCodeAt(i)
+        }
+        const blob = new Blob([bytes], { type: 'image/png' })
+        errorImages.set(key, URL.createObjectURL(blob))
+      }
+    }
+    emit('upload-content', message.content, errorImages)
     emit('file-loading-end')
   }
 }
@@ -590,7 +622,7 @@ const handleNestedActionClick = (node: NodeInfo, actionIndex: number, nestedInde
             使用原生文件选择器
           </n-text>
           <n-text depth="3" style="font-size: 14px; display: block; margin-bottom: 8px">
-            支持 maa.log 格式，或选择包含日志的文件夹
+            支持 maa.log 格式、.zip 压缩包，或选择包含日志的文件夹
           </n-text>
           <n-badge value="Tauri" type="success" style="margin-top: 4px" />
         </div>
@@ -620,7 +652,7 @@ const handleNestedActionClick = (node: NodeInfo, actionIndex: number, nestedInde
             使用 VS Code 文件选择器
           </n-text>
           <n-text depth="3" style="font-size: 14px; display: block; margin-bottom: 8px">
-            支持 maa.log 格式，或选择包含日志的文件夹
+            支持 maa.log 格式、.zip 压缩包，或选择包含日志的文件夹
           </n-text>
           <n-badge value="VS Code" type="info" style="margin-top: 4px" />
         </div>
@@ -656,7 +688,7 @@ const handleNestedActionClick = (node: NodeInfo, actionIndex: number, nestedInde
             拖拽日志文件/文件夹到此处，或点击下方按钮选择
           </n-text>
           <n-text depth="3" style="font-size: 14px; display: block; margin-bottom: 12px">
-            支持 maa.log 格式，文件夹需包含 maa.log 或 maa.bak.log
+            支持 maa.log 格式、.zip 压缩包，文件夹需包含 maa.log 或 maa.bak.log
           </n-text>
           <n-dropdown :options="reloadOptions" @select="handleReloadSelect">
             <n-button type="primary" size="large">
@@ -1009,7 +1041,7 @@ const handleNestedActionClick = (node: NodeInfo, actionIndex: number, nestedInde
       v-if="!isInTauri"
       ref="fileInputRef"
       type="file"
-      accept=".log,.txt,.jsonl"
+      accept=".log,.txt,.jsonl,.zip"
       style="display: none"
       @change="handleFileInputChange"
     />

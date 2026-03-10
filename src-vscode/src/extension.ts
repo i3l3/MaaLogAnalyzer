@@ -1,5 +1,6 @@
 import * as vscode from 'vscode'
 import * as path from 'path'
+import { unzipSync } from 'fflate'
 
 let currentPanel: vscode.WebviewPanel | undefined = undefined
 
@@ -19,20 +20,24 @@ export function activate(context: vscode.ExtensionContext) {
     'maaLogAnalyzer.analyzeFile',
     async (uri: vscode.Uri) => {
       const panel = createOrShowPanel(context)
-      
-      // 读取文件内容
-      try {
-        const fileContent = await vscode.workspace.fs.readFile(uri)
-        const content = new TextDecoder('utf-8').decode(fileContent)
-        
-        // 发送文件内容到 Webview
-        panel.webview.postMessage({
-          type: 'loadFile',
-          content: content,
-          fileName: path.basename(uri.fsPath)
-        })
-      } catch (error) {
-        vscode.window.showErrorMessage(`无法读取文件: ${error}`)
+
+      if (uri.fsPath.toLowerCase().endsWith('.zip')) {
+        await handleZipFile(uri)
+      } else {
+        // 读取文件内容
+        try {
+          const fileContent = await vscode.workspace.fs.readFile(uri)
+          const content = new TextDecoder('utf-8').decode(fileContent)
+
+          // 发送文件内容到 Webview
+          panel.webview.postMessage({
+            type: 'loadFile',
+            content: content,
+            fileName: path.basename(uri.fsPath)
+          })
+        } catch (error) {
+          vscode.window.showErrorMessage(`无法读取文件: ${error}`)
+        }
       }
     }
   )
@@ -77,23 +82,28 @@ function createOrShowPanel(context: vscode.ExtensionContext): vscode.WebviewPane
           const fileUri = await vscode.window.showOpenDialog({
             canSelectMany: false,
             filters: {
-              'Log Files': ['log', 'jsonl', 'txt']
+              'Log Files': ['log', 'jsonl', 'txt', 'zip']
             },
             title: '选择日志文件'
           })
 
           if (fileUri && fileUri[0]) {
-            try {
-              const fileContent = await vscode.workspace.fs.readFile(fileUri[0])
-              const content = new TextDecoder('utf-8').decode(fileContent)
+            const filePath = fileUri[0].fsPath
+            if (filePath.toLowerCase().endsWith('.zip')) {
+              await handleZipFile(fileUri[0])
+            } else {
+              try {
+                const fileContent = await vscode.workspace.fs.readFile(fileUri[0])
+                const content = new TextDecoder('utf-8').decode(fileContent)
 
-              currentPanel?.webview.postMessage({
-                type: 'loadFile',
-                content: content,
-                fileName: path.basename(fileUri[0].fsPath)
-              })
-            } catch (error) {
-              vscode.window.showErrorMessage(`无法读取文件: ${error}`)
+                currentPanel?.webview.postMessage({
+                  type: 'loadFile',
+                  content: content,
+                  fileName: path.basename(filePath)
+                })
+              } catch (error) {
+                vscode.window.showErrorMessage(`无法读取文件: ${error}`)
+              }
             }
           }
           break
@@ -173,6 +183,115 @@ function createOrShowPanel(context: vscode.ExtensionContext): vscode.WebviewPane
   )
 
   return currentPanel
+}
+
+/** 判断某个路径是否是需要解压的文件 */
+function isNeededFile(filePath: string): boolean {
+  const lower = filePath.replace(/\\/g, '/').toLowerCase()
+  const name = lower.substring(lower.lastIndexOf('/') + 1)
+  if (name === 'maa.log' || name === 'maa.bak.log') return true
+  if (lower.includes('/on_error/') && lower.endsWith('.png')) return true
+  return false
+}
+
+/** 找到 maa.log 所在的 base 目录 */
+function findBaseDirectory(paths: string[]): string | null {
+  for (const p of paths) {
+    const normalized = p.replace(/\\/g, '/')
+    const lower = normalized.toLowerCase()
+    if (lower.endsWith('/maa.log') || lower === 'maa.log') {
+      const lastSlash = normalized.lastIndexOf('/')
+      return lastSlash === -1 ? '' : normalized.substring(0, lastSlash)
+    }
+  }
+  return null
+}
+
+/** 拼接路径 */
+function joinZipPath(base: string, name: string): string {
+  return base ? `${base}/${name}` : name
+}
+
+/** 解析 on_error 截图文件名为标准化 key */
+function parseErrorImageKey(fileName: string): string | null {
+  const match = fileName.match(
+    /^(\d{4}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2})\.(\d{1,3})_(.+)\.png$/
+  )
+  if (!match) return null
+  const [, timestamp, ms, nodeName] = match
+  const paddedMs = ms.padEnd(3, '0')
+  return `${timestamp}.${paddedMs}_${nodeName}`
+}
+
+/** 处理 ZIP 文件：Node.js 侧解压 */
+async function handleZipFile(uri: vscode.Uri): Promise<void> {
+  try {
+    const fileContent = await vscode.workspace.fs.readFile(uri)
+    const zipData = new Uint8Array(fileContent)
+
+    const files = unzipSync(zipData, {
+      filter: (file) => isNeededFile(file.name)
+    })
+
+    const paths = Object.keys(files)
+    const basePath = findBaseDirectory(paths)
+    if (basePath === null) {
+      vscode.window.showWarningMessage('ZIP 文件中未找到 maa.log 文件')
+      return
+    }
+
+    let content = ''
+
+    // 读取 maa.bak.log
+    const bakLogPath = joinZipPath(basePath, 'maa.bak.log')
+    for (const p of paths) {
+      if (p.replace(/\\/g, '/').toLowerCase() === bakLogPath.toLowerCase()) {
+        content += new TextDecoder('utf-8').decode(files[p])
+        break
+      }
+    }
+
+    // 读取 maa.log
+    const mainLogPath = joinZipPath(basePath, 'maa.log')
+    for (const p of paths) {
+      if (p.replace(/\\/g, '/').toLowerCase() === mainLogPath.toLowerCase()) {
+        if (content && !content.endsWith('\n')) {
+          content += '\n'
+        }
+        content += new TextDecoder('utf-8').decode(files[p])
+        break
+      }
+    }
+
+    if (!content) {
+      vscode.window.showWarningMessage('ZIP 文件中未找到有效的日志内容')
+      return
+    }
+
+    // 提取 on_error 截图转为 base64
+    const errorImages: { key: string; base64: string }[] = []
+    const onErrorPrefix = joinZipPath(basePath, 'on_error/').toLowerCase()
+    for (const p of paths) {
+      const normalized = p.replace(/\\/g, '/')
+      const lower = normalized.toLowerCase()
+      if (lower.startsWith(onErrorPrefix) && lower.endsWith('.png')) {
+        const fileName = normalized.substring(normalized.lastIndexOf('/') + 1)
+        const key = parseErrorImageKey(fileName)
+        if (key) {
+          const base64 = Buffer.from(files[p]).toString('base64')
+          errorImages.push({ key, base64 })
+        }
+      }
+    }
+
+    currentPanel?.webview.postMessage({
+      type: 'loadZipFile',
+      content,
+      errorImages
+    })
+  } catch (error) {
+    vscode.window.showErrorMessage(`解压 ZIP 文件失败: ${error}`)
+  }
 }
 
 function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri): string {

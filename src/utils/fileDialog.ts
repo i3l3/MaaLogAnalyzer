@@ -12,7 +12,7 @@ export { isTauri, isVSCode }
  * @param bytes 文件的原始字节数组
  * @returns 解码后的字符串
  */
-function decodeFileContent(bytes: Uint8Array): string {
+export function decodeFileContent(bytes: Uint8Array): string {
   // 尝试的编码列表（按优先级）
   const encodings = ['utf-8', 'gbk', 'gb18030', 'gb2312']
 
@@ -50,23 +50,28 @@ export async function openLogFileDialog(): Promise<string | null> {
 
 /**
  * 使用 Tauri API 打开文件
+ * 如果选择了 .zip 文件，使用 Rust 侧 extract_zip_log 命令解压
  */
 async function openLogFileWithTauri(): Promise<string | null> {
   try {
     const { open } = await import('@tauri-apps/plugin-dialog')
-    const { readFile } = await import('@tauri-apps/plugin-fs')
 
     const selected = await open({
       multiple: false,
       filters: [{
         name: 'Log Files',
-        extensions: ['log', 'jsonl', 'txt']
+        extensions: ['log', 'jsonl', 'txt', 'zip']
       }],
       directory: false,
       title: '选择日志文件'
     })
 
     if (selected && typeof selected === 'string') {
+      if (selected.toLowerCase().endsWith('.zip')) {
+        // ZIP 文件：使用 Rust 侧原生解压
+        return await openZipFileWithTauri(selected)
+      }
+      const { readFile } = await import('@tauri-apps/plugin-fs')
       const bytes = await readFile(selected)
       const content = decodeFileContent(bytes)
       return content
@@ -75,6 +80,39 @@ async function openLogFileWithTauri(): Promise<string | null> {
     alert('打开文件失败: ' + error)
   }
   return null
+}
+
+/**
+ * Tauri ZIP 解压结果缓存（用于 openLogFileWithTauri 返回后，由 ProcessView 获取 errorImages）
+ */
+let _lastTauriZipErrorImages: Map<string, string> | null = null
+
+/**
+ * 获取上一次 Tauri ZIP 解压的 errorImages（调用后清空）
+ */
+export function consumeTauriZipErrorImages(): Map<string, string> | null {
+  const images = _lastTauriZipErrorImages
+  _lastTauriZipErrorImages = null
+  return images
+}
+
+/**
+ * 使用 Tauri Rust 命令解压 ZIP 文件
+ */
+async function openZipFileWithTauri(path: string): Promise<string | null> {
+  const { invoke } = await import('@tauri-apps/api/core')
+
+  const result = await invoke<{ content: string; error_images: Record<string, number[]> }>('extract_zip_log', { path })
+
+  // 将 error_images 字节数组转为 blob URL
+  const errorImages = new Map<string, string>()
+  for (const [key, bytes] of Object.entries(result.error_images)) {
+    const blob = new Blob([new Uint8Array(bytes)], { type: 'image/png' })
+    errorImages.set(key, URL.createObjectURL(blob))
+  }
+  _lastTauriZipErrorImages = errorImages
+
+  return result.content
 }
 
 /**

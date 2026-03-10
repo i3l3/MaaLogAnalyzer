@@ -53,6 +53,9 @@
     "build:webview": "cd .. && pnpm build:vscode",
     "package": "vsce package"
   },
+  "dependencies": {
+    "fflate": "^0.8.2"
+  },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",

@@ -138,8 +138,18 @@ const showSettingsModal = ref(false)
 const handleFileUpload = async (file: File) => {
   loading.value = true
   try {
-    const content = await file.text()
-    await processLogContent(content)
+    if (file.name.toLowerCase().endsWith('.zip')) {
+      const { extractZipContent } = await import('./utils/zipExtractor')
+      const result = await extractZipContent(file)
+      if (result) {
+        await processLogContent(result.content, result.errorImages)
+      } else {
+        message.warning('ZIP 文件中未找到有效的日志文件')
+      }
+    } else {
+      const content = await file.text()
+      await processLogContent(content)
+    }
   } catch (error) {
     message.error(getErrorMessage(error), { duration: 5000 })
   } finally {
