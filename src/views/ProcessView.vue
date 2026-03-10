@@ -4,7 +4,7 @@ import {
   NCard, NButton, NIcon, NText, NFlex, NDropdown,
   NScrollbar, NEmpty, NBadge, NTag, NSplit, NList, NListItem
 } from 'naive-ui'
-import { CloudUploadOutlined, FolderOpenOutlined, FileOutlined, FolderOutlined, MenuOutlined } from '@vicons/antd'
+import { CloudUploadOutlined, FolderOpenOutlined, FileOutlined, FolderOutlined, MenuOutlined, VerticalAlignTopOutlined, VerticalAlignBottomOutlined } from '@vicons/antd'
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 import NodeCard from '../components/NodeCard.vue'
@@ -56,6 +56,7 @@ const isInVSCode = ref(isVSCode())
 const taskListCollapsed = ref(false)
 const taskListSize = ref(0.25)
 const taskListSavedSize = ref(0.25)
+const taskListScrollbar = ref<InstanceType<typeof NScrollbar> | null>(null)
 
 // 切换任务列表折叠状态
 const toggleTaskList = () => {
@@ -91,6 +92,7 @@ watch(() => props.detailViewCollapsed, (detailCollapsed) => {
 const nodeNavCollapsed = ref(false)
 const nodeNavSize = ref(0.2)
 const nodeNavSavedSize = ref(0.2)
+const nodeNavScrollbar = ref<InstanceType<typeof NScrollbar> | null>(null)
 
 // 切换节点导航折叠状态
 const toggleNodeNav = () => {
@@ -104,6 +106,22 @@ const toggleNodeNav = () => {
     nodeNavSize.value = 0
     nodeNavCollapsed.value = true
   }
+}
+
+// 节点导航跳转顶部/底部
+const scrollNavToTop = () => {
+  nodeNavScrollbar.value?.scrollTo({ top: 0, behavior: 'smooth' })
+}
+const scrollNavToBottom = () => {
+  nodeNavScrollbar.value?.scrollTo({ top: 999999, behavior: 'smooth' })
+}
+
+// 任务列表跳转顶部/底部
+const scrollTaskListToTop = () => {
+  taskListScrollbar.value?.scrollTo({ top: 0, behavior: 'smooth' })
+}
+const scrollTaskListToBottom = () => {
+  taskListScrollbar.value?.scrollTo({ top: 999999, behavior: 'smooth' })
 }
 
 // 根据显示模式计算节点导航默认宽度
@@ -791,7 +809,20 @@ const handleNestedActionClick = (node: NodeInfo, actionIndex: number, nestedInde
       >
         <!-- 左侧：任务列表 -->
         <template #1>
-          <n-card size="small" title="任务列表" style="height: 100%; display: flex; flex-direction: column; position: relative" content-style="padding: 0; flex: 1; min-height: 0; overflow: hidden">
+          <n-card size="small" style="height: 100%; display: flex; flex-direction: column; position: relative" content-style="padding: 0; flex: 1; min-height: 0; overflow: hidden">
+                <template #header>
+                  <n-flex align="center" justify="space-between" style="padding-right: 16px">
+                    <n-text style="font-size: 14px; font-weight: 500">任务列表</n-text>
+                    <n-flex align="center" style="gap: 2px">
+                      <n-button text size="tiny" @click="scrollTaskListToTop" title="跳转顶部">
+                        <n-icon size="16"><vertical-align-top-outlined /></n-icon>
+                      </n-button>
+                      <n-button text size="tiny" @click="scrollTaskListToBottom" title="跳转底部">
+                        <n-icon size="16"><vertical-align-bottom-outlined /></n-icon>
+                      </n-button>
+                    </n-flex>
+                  </n-flex>
+                </template>
             <!-- 折叠按钮 - 右边缘中间 -->
             <n-button
               circle
@@ -808,7 +839,7 @@ const handleNestedActionClick = (node: NodeInfo, actionIndex: number, nestedInde
                 </n-icon>
               </template>
             </n-button>
-            <n-scrollbar style="height: 100%; max-height: 100%">
+            <n-scrollbar ref="taskListScrollbar" style="height: 100%; max-height: 100%">
               <n-list hoverable clickable>
                 <n-list-item
                   v-for="(task, index) in tasks"
@@ -903,7 +934,20 @@ const handleNestedActionClick = (node: NodeInfo, actionIndex: number, nestedInde
             >
               <!-- 左侧：节点导航列表 -->
               <template #1>
-                <n-card size="small" title="节点导航" style="height: 100%; display: flex; flex-direction: column; position: relative" content-style="padding: 0; flex: 1; min-height: 0; overflow: hidden">
+                <n-card size="small" style="height: 100%; display: flex; flex-direction: column; position: relative" content-style="padding: 0; flex: 1; min-height: 0; overflow: hidden">
+                  <template #header>
+                    <n-flex align="center" justify="space-between" style="padding-right: 16px">
+                      <n-text style="font-size: 14px; font-weight: 500">节点导航</n-text>
+                      <n-flex align="center" style="gap: 2px">
+                        <n-button text size="tiny" @click="scrollNavToTop" title="跳转顶部">
+                          <n-icon size="16"><vertical-align-top-outlined /></n-icon>
+                        </n-button>
+                        <n-button text size="tiny" @click="scrollNavToBottom" title="跳转底部">
+                          <n-icon size="16"><vertical-align-bottom-outlined /></n-icon>
+                        </n-button>
+                      </n-flex>
+                    </n-flex>
+                  </template>
                   <!-- 折叠按钮 - 右边缘中间 -->
                   <n-button
                     circle
@@ -920,7 +964,7 @@ const handleNestedActionClick = (node: NodeInfo, actionIndex: number, nestedInde
                       </n-icon>
                     </template>
                   </n-button>
-                  <n-scrollbar style="height: 100%; max-height: 100%">
+                  <n-scrollbar ref="nodeNavScrollbar" style="height: 100%; max-height: 100%">
                     <n-list hoverable clickable v-if="currentNodes.length > 0">
                       <n-list-item
                         v-for="(node, index) in currentNodes"
