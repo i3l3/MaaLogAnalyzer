@@ -140,30 +140,6 @@ const isRecognitionAttemptSelected = computed(() => {
           props.selectedNestedActionIndex !== null && props.selectedNestedActionIndex !== undefined)
 })
 
-// 当前选中的识别尝试是否成功
-const isCurrentRecognitionSuccess = computed(() => {
-  if (!props.selectedNode || !isRecognitionAttemptSelected.value) return false
-
-  // 如果选中了嵌套动作节点
-  if (props.selectedActionIndex !== null && props.selectedActionIndex !== undefined &&
-      props.selectedNestedActionIndex !== null && props.selectedNestedActionIndex !== undefined) {
-    const nestedActionGroup = props.selectedNode.nested_action_nodes?.[props.selectedActionIndex]
-    const nestedAction = nestedActionGroup?.nested_actions?.[props.selectedNestedActionIndex]
-    return nestedAction?.status === 'success'
-  }
-
-  const attempt = props.selectedNode.recognition_attempts[props.selectedRecognitionIndex!]
-
-  // 如果选中了嵌套节点，检查嵌套节点的状态
-  if (props.selectedNestedIndex !== null && props.selectedNestedIndex !== undefined) {
-    const nested = attempt?.nested_nodes?.[props.selectedNestedIndex]
-    return nested?.status === 'success'
-  }
-
-  // 否则检查识别尝试的状态
-  return attempt?.status === 'success'
-})
-
 // 格式化 JSON
 const formatJson = (obj: any) => {
   return JSON.stringify(obj, null, 2)
