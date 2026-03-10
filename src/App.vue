@@ -179,6 +179,8 @@ const processLogContent = async (content: string, errorImages?: Map<string, stri
 
     if (tasks.value.length > 0) {
       selectedTask.value = tasks.value[0]
+    } else {
+      message.warning('未能解析出有效的任务数据，请检查日志文件格式是否正确', { duration: 5000 })
     }
   } finally {
     // 关闭进度模态框
