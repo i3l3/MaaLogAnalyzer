@@ -1,16 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, h } from 'vue'
+import { ref, computed, h, defineAsyncComponent } from 'vue'
 import {
   NCard, NDataTable, NInput, NSelect, NFlex, NText, NTag, NEmpty, NProgress, NRadioGroup, NRadioButton,
   NUpload, NUploadDragger, NIcon, NButton, NModal, useMessage,
   type DataTableColumns, type UploadFileInfo
 } from 'naive-ui'
 import { CloudUploadOutlined, FolderOpenOutlined } from '@vicons/antd'
-import VChart from 'vue-echarts'
-import { use } from 'echarts/core'
-import { CanvasRenderer } from 'echarts/renderers'
-import { PieChart } from 'echarts/charts'
-import { TitleComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import type { TaskInfo } from '../types'
 import { NodeStatisticsAnalyzer, type NodeStatistics, type RecognitionActionStatistics } from '../utils/nodeStatistics'
 import { formatDuration } from '../utils/formatDuration'
@@ -19,10 +14,28 @@ import { getErrorMessage } from '../utils/errorHandler'
 import { isTauri } from '../utils/platform'
 import { useIsMobile } from '../composables/useIsMobile'
 
-// 注册 ECharts 组件
-use([CanvasRenderer, PieChart, TitleComponent, TooltipComponent, LegendComponent])
 
 const { isMobile } = useIsMobile()
+
+const VChart = defineAsyncComponent(async () => {
+  const [echartsCore, echartsRenderers, echartsCharts, echartsComponents, vueEcharts] = await Promise.all([
+    import('echarts/core'),
+    import('echarts/renderers'),
+    import('echarts/charts'),
+    import('echarts/components'),
+    import('vue-echarts'),
+  ])
+
+  echartsCore.use([
+    echartsRenderers.CanvasRenderer,
+    echartsCharts.PieChart,
+    echartsComponents.TitleComponent,
+    echartsComponents.TooltipComponent,
+    echartsComponents.LegendComponent,
+  ])
+
+  return vueEcharts.default
+})
 
 const props = defineProps<{
   tasks: TaskInfo[]

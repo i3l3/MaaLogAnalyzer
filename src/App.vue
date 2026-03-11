@@ -1,12 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, watch, h } from 'vue'
+import { ref, computed, watch, h, defineAsyncComponent } from 'vue'
 import { NSplit, NCard, NFlex, NButton, NIcon, NDropdown, NModal, NText, NDivider, NTag, NProgress, NSelect, NDrawer, NDrawerContent, NScrollbar, NList, NListItem, useMessage } from 'naive-ui'
 import ProcessView from './views/ProcessView.vue'
 import DetailView from './views/DetailView.vue'
-import TextSearchView from './views/TextSearchView.vue'
-import NodeStatisticsView from './views/NodeStatisticsView.vue'
-import FlowchartView from './views/FlowchartView.vue'
-import SettingsView from './views/SettingsView.vue'
 import { LogParser } from './utils/logParser'
 import { getErrorMessage } from './utils/errorHandler'
 import type { TaskInfo, NodeInfo } from './types'
@@ -32,6 +28,10 @@ const emit = defineEmits<{
 // 移动端检测
 const { isMobile } = useIsMobile()
 
+const TextSearchView = defineAsyncComponent(() => import('./views/TextSearchView.vue'))
+const NodeStatisticsView = defineAsyncComponent(() => import('./views/NodeStatisticsView.vue'))
+const FlowchartView = defineAsyncComponent(() => import('./views/FlowchartView.vue'))
+const SettingsView = defineAsyncComponent(() => import('./views/SettingsView.vue'))
 // 移动端抽屉状态
 const showTaskDrawer = ref(false)
 const showDetailDrawer = ref(false)
