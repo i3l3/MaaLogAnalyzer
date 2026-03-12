@@ -1,6 +1,6 @@
 
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { 
   NCard, 
   NInput, 
@@ -28,6 +28,36 @@ import { useIsMobile } from '../composables/useIsMobile'
 
 const { isMobile } = useIsMobile()
 
+const TEXT_SEARCH_LAYOUT_STORAGE_KEY = 'maa-log-analyzer-text-search-layout'
+
+const clampSplitSize = (value: unknown, min: number, max: number, fallback: number) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return fallback
+  return Math.min(max, Math.max(min, value))
+}
+
+const loadTextSearchSplitSize = () => {
+  try {
+    const raw = localStorage.getItem(TEXT_SEARCH_LAYOUT_STORAGE_KEY)
+    if (!raw) return 0.4
+    const parsed = JSON.parse(raw) as { splitSize?: number }
+    return clampSplitSize(parsed?.splitSize, 0.2, 0.8, 0.4)
+  } catch {
+    return 0.4
+  }
+}
+
+const textSearchSplitSize = ref(loadTextSearchSplitSize())
+
+watch(textSearchSplitSize, (size) => {
+  try {
+    localStorage.setItem(
+      TEXT_SEARCH_LAYOUT_STORAGE_KEY,
+      JSON.stringify({ splitSize: clampSplitSize(size, 0.2, 0.8, 0.4) })
+    )
+  } catch {
+    // ignore write errors
+  }
+})
 // Props
 const props = defineProps<{
   isDark?: boolean
@@ -811,7 +841,7 @@ const loadContextLines = async (targetLine: number) => {
       v-else
       :key="contentKey"
       style="flex: 1; min-height: 0"
-      :default-size="0.4"
+      v-model:size="textSearchSplitSize"
       :min="0.2"
       :max="0.8"
     >
@@ -1283,4 +1313,3 @@ const loadContextLines = async (targetLine: number) => {
   background: transparent;
 }
 </style>
-

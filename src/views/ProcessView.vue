@@ -16,6 +16,43 @@ import { getSettings } from '../utils/settings'
 
 const settings = getSettings()
 
+const PROCESS_LAYOUT_STORAGE_KEY = 'maa-log-analyzer-process-layout'
+
+interface ProcessLayoutState {
+  taskListCollapsed?: boolean
+  taskListSize?: number
+  taskListSavedSize?: number
+  nodeNavCollapsed?: boolean
+  nodeNavSize?: number
+  nodeNavSavedSize?: number
+}
+
+const clampLayoutSize = (value: unknown, min: number, max: number, fallback: number) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return fallback
+  return Math.min(max, Math.max(min, value))
+}
+
+const readProcessLayoutState = (): ProcessLayoutState => {
+  try {
+    const raw = localStorage.getItem(PROCESS_LAYOUT_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as ProcessLayoutState
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+const saveProcessLayoutState = (state: ProcessLayoutState) => {
+  try {
+    localStorage.setItem(PROCESS_LAYOUT_STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    // ignore write errors
+  }
+}
+
+const processLayoutState = readProcessLayoutState()
+
 const props = defineProps<{
   tasks: TaskInfo[]
   selectedTask: TaskInfo | null
@@ -55,9 +92,13 @@ const isInTauri = ref(isTauri())
 const isInVSCode = ref(isVSCode())
 
 // 任务列表折叠状态
-const taskListCollapsed = ref(false)
-const taskListSize = ref(0.25)
-const taskListSavedSize = ref(0.25)
+const taskListCollapsed = ref(Boolean(processLayoutState.taskListCollapsed))
+const taskListSize = ref(
+  taskListCollapsed.value
+    ? 0
+    : clampLayoutSize(processLayoutState.taskListSize, 0, 0.4, 0.25)
+)
+const taskListSavedSize = ref(clampLayoutSize(processLayoutState.taskListSavedSize, 0.05, 0.4, 0.25))
 const taskListScrollbar = ref<InstanceType<typeof NScrollbar> | null>(null)
 
 // 切换任务列表折叠状态
@@ -91,9 +132,13 @@ watch(() => props.detailViewCollapsed, (detailCollapsed) => {
 })
 
 // 节点导航折叠状态
-const nodeNavCollapsed = ref(false)
-const nodeNavSize = ref(0.2)
-const nodeNavSavedSize = ref(0.2)
+const nodeNavCollapsed = ref(Boolean(processLayoutState.nodeNavCollapsed))
+const nodeNavSize = ref(
+  nodeNavCollapsed.value
+    ? 0
+    : clampLayoutSize(processLayoutState.nodeNavSize, 0, 0.4, 0.2)
+)
+const nodeNavSavedSize = ref(clampLayoutSize(processLayoutState.nodeNavSavedSize, 0.05, 0.4, 0.2))
 const nodeNavScrollbar = ref<InstanceType<typeof NScrollbar> | null>(null)
 
 // 切换节点导航折叠状态
@@ -142,6 +187,17 @@ watch([taskListCollapsed, () => props.detailViewCollapsed, () => settings.displa
     nodeNavSize.value = size
     nodeNavSavedSize.value = size
   }
+})
+
+watch([taskListCollapsed, taskListSize, taskListSavedSize, nodeNavCollapsed, nodeNavSize, nodeNavSavedSize], ([taskCollapsed, taskSize, taskSaved, navCollapsed, navSize, navSaved]) => {
+  saveProcessLayoutState({
+    taskListCollapsed: taskCollapsed,
+    taskListSize: clampLayoutSize(taskSize, 0, 0.4, 0.25),
+    taskListSavedSize: clampLayoutSize(taskSaved, 0.05, 0.4, 0.25),
+    nodeNavCollapsed: navCollapsed,
+    nodeNavSize: clampLayoutSize(navSize, 0, 0.4, 0.2),
+    nodeNavSavedSize: clampLayoutSize(navSaved, 0.05, 0.4, 0.2)
+  })
 })
 
 // 虚拟滚动不需要手动管理节点引用

@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, computed, watch, h, defineAsyncComponent, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { NSplit, NCard, NFlex, NButton, NIcon, NDropdown, NModal, NText, NTag, NProgress, NSelect, NDrawer, NDrawerContent, NScrollbar, NList, NListItem, useMessage } from 'naive-ui'
 import ProcessView from './views/ProcessView.vue'
@@ -95,7 +95,40 @@ const handleViewModeSelect = (key: string) => {
   }
 }
 
-const splitSize = ref(0.65)
+const APP_LAYOUT_STORAGE_KEY = 'maa-log-analyzer-app-layout'
+
+interface AppLayoutState {
+  analysisSplitSize?: number
+  splitVerticalSize?: number
+}
+
+const clamp = (value: unknown, min: number, max: number, fallback: number) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return fallback
+  return Math.min(max, Math.max(min, value))
+}
+
+const readAppLayoutState = (): AppLayoutState => {
+  try {
+    const raw = localStorage.getItem(APP_LAYOUT_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as AppLayoutState
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+const saveAppLayoutState = (state: AppLayoutState) => {
+  try {
+    localStorage.setItem(APP_LAYOUT_STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    // ignore write errors
+  }
+}
+
+const appLayoutState = readAppLayoutState()
+const splitSize = ref(clamp(appLayoutState.analysisSplitSize, 0.4, 1, 0.65))
+const splitVerticalSize = ref(clamp(appLayoutState.splitVerticalSize, 0.2, 0.8, 0.5))
 const parser = new LogParser()
 const tasks = ref<TaskInfo[]>([])
 const selectedTask = ref<TaskInfo | null>(null)
@@ -742,6 +775,20 @@ watch(viewMode, () => {
   void resolveCurrentTourTarget()
 })
 
+watch([splitSize, detailViewCollapsed, splitVerticalSize], ([currentSplitSize, collapsed, currentVerticalSize]) => {
+  const prev = readAppLayoutState()
+  const next: AppLayoutState = {
+    ...prev,
+    splitVerticalSize: clamp(currentVerticalSize, 0.2, 0.8, 0.5)
+  }
+
+  // 折叠状态下 splitSize 会被强制设为 1，不写回以避免刷新后丢失用户比例。
+  if (!collapsed) {
+    next.analysisSplitSize = clamp(currentSplitSize, 0.4, 1, 0.65)
+  }
+
+  saveAppLayoutState(next)
+})
 onMounted(() => {
   window.addEventListener('resize', handleTourViewportChange)
   window.addEventListener('scroll', handleTourViewportChange, true)
@@ -1075,7 +1122,7 @@ onBeforeUnmount(() => {
       <div v-show="viewMode === 'split'" data-tour="split-main" style="height: 100%">
         <n-split
           direction="vertical"
-          :default-size="0.5"
+          v-model:size="splitVerticalSize"
           :min="0.2"
           :max="0.8"
           style="height: 100%"
@@ -1298,5 +1345,3 @@ onBeforeUnmount(() => {
     </n-modal>
   </div>
 </template>
-
-
