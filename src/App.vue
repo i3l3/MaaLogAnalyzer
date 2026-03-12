@@ -356,13 +356,20 @@ const resolveCurrentTourTarget = async () => {
   if (!tourActive.value || !step) return
 
   const runId = ++tourResolveRunId.value
+  const needsAboutModal = step.id === 'tutorial-replay-entry' || step.target.includes('about-start-tutorial')
 
   if (step.view && viewMode.value !== step.view) {
     viewMode.value = step.view
   }
 
+  if (needsAboutModal && !showAboutModal.value) {
+    showAboutModal.value = true
+  } else if (!needsAboutModal && showAboutModal.value) {
+    showAboutModal.value = false
+  }
+
   await nextTick()
-  await new Promise(resolve => setTimeout(resolve, 80))
+  await new Promise(resolve => setTimeout(resolve, needsAboutModal ? 180 : 80))
 
   const timeout = step.optional ? 1500 : 5000
   const el = await waitForElement(step.target, timeout)
@@ -1274,7 +1281,7 @@ onBeforeUnmount(() => {
           <n-flex vertical style="gap: 10px">
             <n-text strong>快速开始</n-text>
             <n-text depth="3" style="font-size: 13px">首次使用建议先跑一遍新手教程，了解大致功能。</n-text>
-            <n-button type="primary" :loading="tutorialLoadingSample" @click="openTutorialFromAbout">
+            <n-button data-tour="about-start-tutorial" type="primary" :loading="tutorialLoadingSample" @click="openTutorialFromAbout">
               开始新手教程
             </n-button>
           </n-flex>

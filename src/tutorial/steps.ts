@@ -1,6 +1,6 @@
 import type { TourStep } from './types'
 
-export const TOUR_VERSION = 1
+export const TOUR_VERSION = 2
 export const TOUR_STORAGE_KEY = 'maa-log-analyzer-tutorial-version'
 
 // Boarded by sections: overall intro first, then each feature area.
@@ -110,7 +110,19 @@ export const TOUR_STEPS: TourStep[] = [
     target: '[data-tour="split-main"]',
     view: 'split',
     placement: 'left',
-    nextLabel: '完成教程',
+    nextLabel: '下一步',
     sinceVersion: 1
+  },
+  {
+    id: 'tutorial-replay-entry',
+    sectionId: 'ending',
+    sectionTitle: '结束',
+    title: '再次观看教程',
+    content: '以后想重看教程，可以在“关于”里的“快速开始”区域点击“开始新手教程”。',
+    target: '[data-tour="about-start-tutorial"]',
+    view: 'split',
+    placement: 'left',
+    nextLabel: '完成教程',
+    sinceVersion: 2
   }
 ]
