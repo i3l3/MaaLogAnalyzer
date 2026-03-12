@@ -354,24 +354,33 @@ async function openFolderDialogTauri(): Promise<{ content: string; errorImages: 
 
     console.log('[文件夹] 选择的路径:', selected)
 
-    let debugPath = `${selected}\\debug`
+    let debugPath = selected
+    let bakLogPath = `${debugPath}\\maa.bak.log`
+    let mainLogPath = `${debugPath}\\maa.log`
 
-    // 如果没有debug文件夹，递归查找
-    if (!(await exists(debugPath))) {
-      console.log('[文件夹] debug文件夹不存在，开始递归查找')
-      const found = await findDebugFolder(selected)
-      if (!found) {
-        alert('未找到debug文件夹')
-        return null
+    // 先检查当前文件夹是否就是日志目录（例如用户直接选择了 debug 文件夹）
+    if (!(await exists(bakLogPath)) && !(await exists(mainLogPath))) {
+      debugPath = `${selected}\\debug`
+      bakLogPath = `${debugPath}\\maa.bak.log`
+      mainLogPath = `${debugPath}\\maa.log`
+
+      // 如果没有 debug 子文件夹，再递归查找
+      if (!(await exists(debugPath))) {
+        console.log('[文件夹] debug文件夹不存在，开始递归查找')
+        const found = await findDebugFolder(selected)
+        if (!found) {
+          alert('未找到debug文件夹或maa.log文件')
+          return null
+        }
+        debugPath = found
+        bakLogPath = `${debugPath}\\maa.bak.log`
+        mainLogPath = `${debugPath}\\maa.log`
+        console.log('[文件夹] 找到debug文件夹:', debugPath)
       }
-      debugPath = found
-      console.log('[文件夹] 找到debug文件夹:', debugPath)
     }
 
     // 读取日志文件
     let content = ''
-    const bakLogPath = `${debugPath}\\maa.bak.log`
-    const mainLogPath = `${debugPath}\\maa.log`
 
     console.log('[文件夹] 读取日志文件')
 
@@ -395,13 +404,8 @@ async function openFolderDialogTauri(): Promise<{ content: string; errorImages: 
 
     console.log('[文件夹] 日志文件读取完成，大小:', content.length)
 
-    // 读取截图
     const errorImages = await readErrorImages(debugPath)
-
-    // 读取 vision 调试截图
     const visionImages = await readVisionImages(debugPath)
-
-    // 读取 wait_freezes 调试截图
     const waitFreezesImages = await readWaitFreezesImages(debugPath)
 
     return { content, errorImages, visionImages, waitFreezesImages }
@@ -425,7 +429,6 @@ function parseWaitFreezesKey(fileName: string): string | null {
   const paddedMs = ms.padEnd(3, '0')
   return `${timestamp}.${paddedMs}_${rest}`
 }
-
 /**
  * 读取 vision 文件夹中的 wait_freezes 调试截图（Tauri）
  */
