@@ -6,13 +6,14 @@ defineProps<{
   data: FlowNodeData
   selected?: boolean
   isStart?: boolean
+  dimmed?: boolean
 }>()
 </script>
 
 <template>
   <div
     class="flowchart-node"
-    :class="[`status-${data.status}`, { selected, 'is-start': isStart }]"
+    :class="[`status-${data.status}`, { selected, 'is-start': isStart, dimmed }]"
   >
     <Handle type="target" :position="Position.Top" />
 
@@ -46,6 +47,10 @@ defineProps<{
 
 .flowchart-node:hover {
   box-shadow: 0 0 0 2px var(--flowchart-hover-ring);
+}
+
+.flowchart-node.dimmed {
+  opacity: 0.2;
 }
 
 .flowchart-node.selected {

@@ -252,6 +252,7 @@ const { fitView, getNode, setCenter } = useVueFlow('flowchart')
 const flowNodes = ref<any[]>([])
 const flowEdges = ref<any[]>([])
 const layoutRunId = ref(0)
+const focusedNodeId = ref<string | null>(null)
 
 // Navigation panel
 const selectedTimelineIndex = ref<number | null>(null)
@@ -405,11 +406,72 @@ function closePopover() {
   popoverNodeId.value = null
 }
 
+function getBaseEdgeStyle(d: FlowEdgeData) {
+  if (!d.executed) {
+    const style: Record<string, string | number> = { stroke: '#999', strokeWidth: 1, opacity: 0.5 }
+    if (d.jump_back) {
+      style.strokeDasharray = '8 4'
+    } else if (d.anchor) {
+      style.strokeDasharray = '3 3'
+    }
+    return style
+  }
+
+  const color = d.edgeStatus === 'failed' ? '#d03050' : '#18a058'
+  const style: Record<string, string | number> = { stroke: color, strokeWidth: 3, opacity: 1 }
+  if (d.jump_back) {
+    style.strokeDasharray = '8 4'
+  } else if (d.anchor) {
+    style.strokeDasharray = '3 3'
+  }
+  return style
+}
+
+const highlightedNodeIds = computed(() => {
+  if (!focusedNodeId.value) return null
+  const ids = new Set<string>([focusedNodeId.value])
+  flowEdges.value.forEach((edge: any) => {
+    if (edge.source === focusedNodeId.value) ids.add(edge.target)
+    if (edge.target === focusedNodeId.value) ids.add(edge.source)
+  })
+  return ids
+})
+
+const highlightedEdgeIds = computed(() => {
+  if (!focusedNodeId.value) return null
+  const ids = new Set<string>()
+  flowEdges.value.forEach((edge: any) => {
+    if (edge.source === focusedNodeId.value || edge.target === focusedNodeId.value) {
+      ids.add(edge.id)
+    }
+  })
+  return ids
+})
+
+function applyFocusStyles() {
+  const activeEdgeIds = highlightedEdgeIds.value
+  flowEdges.value = flowEdges.value.map((edge: any) => {
+    const d = edge.data as FlowEdgeData
+    const baseStyle = getBaseEdgeStyle(d)
+    const dimmed = activeEdgeIds != null && !activeEdgeIds.has(edge.id)
+    return {
+      ...edge,
+      style: {
+        ...baseStyle,
+        opacity: dimmed ? 0.12 : (baseStyle.opacity ?? 1),
+      },
+    }
+  })
+}
+
+
 // Select a timeline item: center canvas + open popover
 function selectTimelineItem(index: number) {
   selectedTimelineIndex.value = index
   const item = executionTimeline.value[index]
   if (!item) return
+
+  focusedNodeId.value = item.name
 
   // Center canvas on the node
   const flowNode = getNode.value(item.name)
@@ -452,35 +514,26 @@ watch(selectedTask, async (task) => {
   const { nodes, edges } = await buildFlowchartData(task)
   if (runId !== layoutRunId.value) return
 
-  // Apply edge styles
+  // Apply base edge styles
   edges.forEach(edge => {
     const d = edge.data as FlowEdgeData
-    if (!d.executed) {
-      edge.style = { stroke: '#999', strokeWidth: 1, opacity: 0.5 }
-      if (d.jump_back) {
-        edge.style.strokeDasharray = '8 4'
-      } else if (d.anchor) {
-        edge.style.strokeDasharray = '3 3'
-      }
-    } else {
-      const color = d.edgeStatus === 'failed' ? '#d03050' : '#18a058'
-      edge.style = { stroke: color, strokeWidth: 3 }
-      edge.animated = false
-      if (d.jump_back) {
-        edge.style.strokeDasharray = '8 4'
-      } else if (d.anchor) {
-        edge.style.strokeDasharray = '3 3'
-      }
-    }
+    edge.style = getBaseEdgeStyle(d)
+    edge.animated = false
   })
 
   flowNodes.value = nodes
   flowEdges.value = edges
+  focusedNodeId.value = null
+  applyFocusStyles()
 
   nextTick(() => {
     setTimeout(() => fitView({ padding: 0.2 }), 50)
   })
 }, { immediate: true })
+
+watch(focusedNodeId, () => {
+  applyFocusStyles()
+})
 
 // Handle node click
 const onNodeClick = (event: { node: { id: string; data: FlowNodeData } }) => {
@@ -489,10 +542,12 @@ const onNodeClick = (event: { node: { id: string; data: FlowNodeData } }) => {
 
   // Toggle popover: click same node again closes it
   if (popoverNodeId.value === event.node.id) {
+    focusedNodeId.value = null
     closePopover()
     return
   }
 
+  focusedNodeId.value = event.node.id
   popoverNodeId.value = event.node.id
   nextTick(() => {
     updatePopoverPosition()
@@ -510,6 +565,7 @@ const onNodeClick = (event: { node: { id: string; data: FlowNodeData } }) => {
 
 // Close popover on pane click (clicking empty canvas area)
 const onPaneClick = () => {
+  focusedNodeId.value = null
   closePopover()
 }
 </script>
@@ -595,6 +651,7 @@ const onPaneClick = () => {
               :data="nodeProps.data"
               :selected="nodeProps.id === selectedFlowNodeId"
               :is-start="nodeProps.id === executionTimeline[0]?.name"
+              :dimmed="highlightedNodeIds != null && !highlightedNodeIds.has(nodeProps.id)"
             />
           </template>
         </VueFlow>
