@@ -11,6 +11,7 @@ export interface TourStep {
   title: string
   content: string
   target: string
+  mobileTarget?: string
   view?: TourViewMode
   placement?: TourPlacement
   padding?: number

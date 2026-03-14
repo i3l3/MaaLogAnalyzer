@@ -905,12 +905,17 @@ const updateTourRectFromElement = (el: HTMLElement) => {
   tourTargetRect.value = { top, left, width, height }
 }
 
+const getTourTargetSelector = (step: { target: string; mobileTarget?: string }) => {
+  return isMobile.value && step.mobileTarget ? step.mobileTarget : step.target
+}
+
 const resolveCurrentTourTarget = async () => {
   const step = currentTourStep.value
   if (!tourActive.value || !step) return
 
   const runId = ++tourResolveRunId.value
-  const needsAboutModal = step.id === 'tutorial-replay-entry' || step.target.includes('about-start-tutorial')
+  const targetSelector = getTourTargetSelector(step)
+  const needsAboutModal = step.id === 'tutorial-replay-entry' || targetSelector.includes('about-start-tutorial')
 
   if (step.view && viewMode.value !== step.view) {
     viewMode.value = step.view
@@ -926,7 +931,7 @@ const resolveCurrentTourTarget = async () => {
   await new Promise(resolve => setTimeout(resolve, needsAboutModal ? 180 : 80))
 
   const timeout = step.optional ? 1500 : 5000
-  const el = await waitForElement(step.target, timeout)
+  const el = await waitForElement(targetSelector, timeout)
 
   if (runId !== tourResolveRunId.value || !tourActive.value) {
     return
@@ -1435,7 +1440,7 @@ onBeforeUnmount(() => {
           @select="handleMobileMenuSelect"
           trigger="click"
         >
-          <n-button size="small">
+          <n-button size="small" data-tour="header-mobile-menu">
             {{ currentViewLabel }}
           </n-button>
         </n-dropdown>
