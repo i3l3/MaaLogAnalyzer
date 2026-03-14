@@ -106,6 +106,7 @@ const props = defineProps<{
   onExpandDetailView?: () => void
   isMobile?: boolean
   pendingScrollNodeId?: number | null
+  isRealtimeStreaming?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -125,6 +126,8 @@ const emit = defineEmits<{
 
 // 当前选中的任务索引
 const activeTaskIndex = ref(0)
+const followLast = ref(true)
+const isRealtimeStreaming = computed(() => props.isRealtimeStreaming === true)
 
 // 文件读取加载状态
 const fileLoading = ref(false)
@@ -246,23 +249,39 @@ watch([taskListCollapsed, taskListSize, taskListSavedSize, nodeNavCollapsed, nod
 
 // 虚拟滚动不需要手动管理节点引用
 
-// 滚动到指定节点（虚拟滚动版本）
-const scrollToNode = (index: number) => {
-  if (virtualScroller.value) {
-    // 对于动态高度的虚拟滚动，需要多次调用以确保准确滚动
-    // 第一次滚动
-    virtualScroller.value.scrollToItem(index)
+const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
 
-    // 等待渲染后再次调整位置，确保准确
-    setTimeout(() => {
-      virtualScroller.value?.scrollToItem(index)
-    }, 100)
+// 动态高度 + 高频更新下，scrollToItem 可能在尺寸缓存未就绪时抛错（accumulator undefined）
+const safeScrollToItem = async (index: number, retry = 0): Promise<boolean> => {
+  const scroller = virtualScroller.value
+  const total = currentNodes.value.length
+  if (!scroller || total === 0) return false
 
-    // 再次确认，处理复杂的动态高度情况
-    setTimeout(() => {
-      virtualScroller.value?.scrollToItem(index)
-    }, 300)
+  const targetIndex = Math.max(0, Math.min(index, total - 1))
+  await nextTick()
+
+  try {
+    scroller.scrollToItem(targetIndex)
+    return true
+  } catch (error) {
+    if (retry >= 2) {
+      console.debug('[follow] scrollToItem skipped:', error)
+      return false
+    }
+    await delay(60 * (retry + 1))
+    return safeScrollToItem(targetIndex, retry + 1)
   }
+}
+
+// 滚动到指定节点（虚拟滚动版本）
+const scrollToNode = async (index: number) => {
+  const ok = await safeScrollToItem(index)
+  if (!ok) return
+
+  // 动态高度内容渲染后再补一次，减少偏移
+  setTimeout(() => {
+    void safeScrollToItem(index)
+  }, 80)
 }
 
 // 当前任务的节点列表（添加唯一key用于虚拟滚动）
@@ -280,6 +299,9 @@ const virtualScroller = ref<InstanceType<typeof DynamicScroller> | null>(null)
 
 // 切换任务
 const handleTabChange = (index: number) => {
+  if (isRealtimeStreaming.value) {
+    followLast.value = false
+  }
   activeTaskIndex.value = index
   if (props.tasks[index]) {
     emit('select-task', props.tasks[index])
@@ -288,19 +310,67 @@ const handleTabChange = (index: number) => {
 
 // 同步 activeTaskIndex 与 selectedTask（处理外部改变 selectedTask 的情况）
 watch(() => props.selectedTask, async (newTask, oldTask) => {
+  const switchedTask = newTask?.task_id !== oldTask?.task_id
+
   // 只在外部改变 selectedTask 时同步 activeTaskIndex（不是通过点击任务列表触发的）
-  if (newTask && newTask !== oldTask) {
-    const index = props.tasks.findIndex(t => t === newTask)
+  if (newTask && switchedTask) {
+    const index = props.tasks.findIndex(t => t.task_id === newTask.task_id)
     if (index !== -1 && index !== activeTaskIndex.value) {
       activeTaskIndex.value = index
     }
   }
-  // 任务切换时重置滚动位置到顶部（延迟到下一帧，确保 DOM 更新完成）
-  await new Promise(resolve => setTimeout(resolve, 0))
-  if (virtualScroller.value) {
-    virtualScroller.value.scrollToItem(0)
+
+  // 只有真正切换任务时才重置到顶部；实时更新同一任务不打断当前位置
+  if (switchedTask) {
+    await safeScrollToItem(0)
   }
-}, { immediate: true })
+}, { immediate: true, flush: 'post' })
+
+const followToLatest = async () => {
+  if (!isRealtimeStreaming.value || !followLast.value) return
+  if (props.tasks.length === 0) return
+
+  const latestIndex = props.tasks.length - 1
+  const latestTask = props.tasks[latestIndex]
+  if (!latestTask) return
+
+  const needSwitchTask = props.selectedTask?.task_id !== latestTask.task_id
+  if (needSwitchTask) {
+    activeTaskIndex.value = latestIndex
+    emit('select-task', latestTask)
+    await nextTick()
+  }
+
+  taskListScrollbar.value?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: 'smooth' })
+  nodeNavScrollbar.value?.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: 'smooth' })
+
+  const latestNodeIndex = currentNodes.value.length - 1
+  if (latestNodeIndex >= 0) {
+    void scrollToNode(latestNodeIndex)
+  }
+}
+
+const toggleFollowLast = () => {
+  followLast.value = !followLast.value
+  if (followLast.value) {
+    void followToLatest()
+  }
+}
+
+const followTasksFingerprint = computed(() => {
+  return props.tasks.map(task => `${task.task_id}:${task.nodes.length}`).join('|')
+})
+
+watch([followTasksFingerprint, isRealtimeStreaming, followLast], ([, streaming, following]) => {
+  if (!streaming || !following) return
+  void followToLatest()
+}, { immediate: true, flush: 'post' })
+
+watch(isRealtimeStreaming, (streaming) => {
+  if (!streaming) return
+  if (!followLast.value) return
+  void followToLatest()
+}, { flush: 'post' })
 
 // 从流程图定位过来时，滚动到指定节点
 watch(() => props.pendingScrollNodeId, (nodeId) => {
@@ -308,7 +378,7 @@ watch(() => props.pendingScrollNodeId, (nodeId) => {
   const index = currentNodes.value.findIndex(n => n.node_id === nodeId)
   if (index >= 0) {
     nextTick(() => {
-      scrollToNode(index)
+      void scrollToNode(index)
       emit('scroll-done')
     })
   }
@@ -749,8 +819,32 @@ const handleNestedActionClick = (node: NodeInfo, actionIndex: number, nestedInde
     data-tour="analysis-process-root"
     :title="isMobile ? undefined : 'MAA 日志分析器'"
     style="height: 100%"
-    content-style="display: flex; flex-direction: column; gap: 16px; min-height: 0"
+    content-style="display: flex; flex-direction: column; gap: 12px; min-height: 0"
   >
+    <template #header-extra>
+      <n-flex v-if="!isMobile" align="center" style="gap: 8px">
+        <n-tag v-if="isRealtimeStreaming" type="info" size="small">实时解析中</n-tag>
+        <n-button
+          size="small"
+          :type="isRealtimeStreaming && followLast ? 'primary' : 'default'"
+          :disabled="!isRealtimeStreaming"
+          @click="toggleFollowLast"
+        >
+          {{ isRealtimeStreaming ? (followLast ? '跟随中' : '跟随最新') : '未实时' }}
+        </n-button>
+        <n-dropdown :options="reloadOptions" @select="handleReloadSelect">
+          <n-button size="small">
+            <template #icon>
+              <n-icon>
+                <folder-open-outlined v-if="isInTauri || isInVSCode" />
+                <cloud-upload-outlined v-else />
+              </n-icon>
+            </template>
+            重新加载
+          </n-button>
+        </n-dropdown>
+      </n-flex>
+    </template>
     <!-- 移动端工具栏 -->
     <n-flex v-if="isMobile && tasks.length > 0" align="center" style="gap: 8px">
       <n-button text style="font-size: 20px" @click="emit('open-task-drawer')">
@@ -759,6 +853,14 @@ const handleNestedActionClick = (node: NodeInfo, actionIndex: number, nestedInde
       <n-text strong style="font-size: 14px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
         {{ selectedTask?.entry || '选择任务' }}
       </n-text>
+      <n-button
+        size="small"
+        :type="isRealtimeStreaming && followLast ? 'primary' : 'default'"
+        :disabled="!isRealtimeStreaming"
+        @click="toggleFollowLast"
+      >
+        {{ isRealtimeStreaming ? (followLast ? '跟随中' : '跟随最新') : '未实时' }}
+      </n-button>
       <n-dropdown :options="reloadOptions" @select="handleReloadSelect">
         <n-button size="small">
           <template #icon>
@@ -909,39 +1011,6 @@ const handleNestedActionClick = (node: NodeInfo, actionIndex: number, nestedInde
 
       <!-- 桌面端：完整 NSplit 布局 -->
       <template v-else>
-      <!-- 操作按钮 -->
-      <n-flex>
-        <!-- Tauri 环境 -->
-        <n-dropdown v-if="isInTauri" :options="reloadOptions" @select="handleReloadSelect">
-          <n-button>
-            <template #icon>
-              <n-icon><folder-open-outlined /></n-icon>
-            </template>
-            重新加载
-          </n-button>
-        </n-dropdown>
-
-        <!-- VS Code 环境 -->
-        <n-dropdown v-else-if="isInVSCode" :options="reloadOptions" @select="handleReloadSelect">
-          <n-button>
-            <template #icon>
-              <n-icon><folder-open-outlined /></n-icon>
-            </template>
-            重新加载
-          </n-button>
-        </n-dropdown>
-
-        <!-- Web 环境 -->
-        <n-dropdown v-else :options="reloadOptions" @select="handleReloadSelect">
-          <n-button>
-            <template #icon>
-              <n-icon><cloud-upload-outlined /></n-icon>
-            </template>
-            重新加载
-          </n-button>
-        </n-dropdown>
-      </n-flex>
-
       <!-- 左右分栏布局 -->
       <n-split
         direction="horizontal"
@@ -1286,3 +1355,4 @@ const handleNestedActionClick = (node: NodeInfo, actionIndex: number, nestedInde
   background-color: transparent !important;
 }
 </style>
+

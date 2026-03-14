@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, computed, watch, h, defineAsyncComponent, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { NSplit, NCard, NFlex, NButton, NIcon, NDropdown, NModal, NText, NTag, NProgress, NSelect, NDrawer, NDrawerContent, NScrollbar, NList, NListItem, useMessage } from 'naive-ui'
 import ProcessView from './views/ProcessView.vue'
@@ -146,6 +146,189 @@ const setTextSearchLoadedTargets = (targets: TextSearchLoadedTarget[], defaultId
   textSearchLoadedTargets.value = targets
   textSearchLoadedDefaultTargetId.value = defaultId ?? (targets[0]?.id ?? '')
 }
+type JsonRpcId = string | number | null
+
+interface JsonRpcNotification {
+  jsonrpc: '2.0'
+  method: string
+  params?: unknown
+}
+
+interface JsonRpcRequest {
+  jsonrpc: '2.0'
+  id: JsonRpcId
+  method: string
+  params?: unknown
+}
+
+interface JsonRpcResponseSuccess {
+  jsonrpc: '2.0'
+  id: JsonRpcId
+  result: unknown
+}
+
+interface JsonRpcResponseError {
+  jsonrpc: '2.0'
+  id: JsonRpcId
+  error: {
+    code: number
+    message: string
+    data?: unknown
+  }
+}
+
+type JsonRpcResponse = JsonRpcResponseSuccess | JsonRpcResponseError
+type JsonRpcMessage = JsonRpcNotification | JsonRpcRequest | JsonRpcResponse
+
+interface RealtimeEventItem {
+  seq: number
+  at: number
+  msg: string
+  details: Record<string, unknown>
+}
+
+interface RealtimeSessionState {
+  sessionId: string
+  startedAt: number
+  lastSeq: number
+  lines: string[]
+}
+
+const realtimeSession = ref<RealtimeSessionState | null>(null)
+let realtimeParseTimer: number | null = null
+const realtimeParsing = ref(false)
+const realtimeReparseRequested = ref(false)
+const realtimeStreaming = ref(false)
+const isRealtimeContext = computed(() => {
+  return realtimeSession.value !== null || textSearchLoadedDefaultTargetId.value.startsWith('realtime:')
+})
+
+const asRecord = (value: unknown): Record<string, unknown> | null => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+const toFiniteNumber = (value: unknown, fallback: number): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
+  return value
+}
+
+const normalizeRealtimeMessage = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null
+  const msg = value.trim()
+  if (!msg) return null
+  if (msg.startsWith('Tasker.Task.') || msg.startsWith('Node.')) return msg
+  if (msg.startsWith('Task.')) return `Tasker.${msg}`
+  if (msg.startsWith('PipelineNode.')) return `Node.${msg}`
+  if (msg.startsWith('RecognitionNode.')) return `Node.${msg}`
+  if (msg.startsWith('ActionNode.')) return `Node.${msg}`
+  if (msg.startsWith('NextList.')) return `Node.${msg}`
+  if (msg.startsWith('Recognition.')) return `Node.${msg}`
+  if (msg.startsWith('Action.')) return `Node.${msg}`
+  return null
+}
+
+const toRealtimeProcessId = (details: Record<string, unknown>): string => {
+  const candidates = [details.process_id, details.processId, details.pid]
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.startsWith('Px') ? candidate : `Px${candidate}`
+    }
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      return `Px${candidate}`
+    }
+  }
+  return 'Px0'
+}
+
+const toRealtimeThreadId = (details: Record<string, unknown>): string => {
+  const candidates = [details.thread_id, details.threadId, details.tid]
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.startsWith('Tx') ? candidate : `Tx${candidate}`
+    }
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      return `Tx${candidate}`
+    }
+  }
+  return 'Tx0'
+}
+
+const toRealtimeTimestamp = (at: number): string => {
+  const date = new Date(at)
+  if (Number.isNaN(date.getTime())) return new Date().toISOString()
+  return date.toISOString()
+}
+
+const toSyntheticEventLine = (event: RealtimeEventItem): string | null => {
+  const normalizedMsg = normalizeRealtimeMessage(event.msg)
+  if (!normalizedMsg) return null
+
+  let detailsText = '{}'
+  try {
+    detailsText = JSON.stringify(event.details)
+  } catch {
+    return null
+  }
+
+  return `[${toRealtimeTimestamp(event.at)}][INF][${toRealtimeProcessId(event.details)}][${toRealtimeThreadId(event.details)}][realtime][0][on_event_notify] !!!OnEventNotify!!! [handle=realtime] [msg=${normalizedMsg}] [details=${detailsText}]`
+}
+
+const syncRealtimeLoadedTarget = (session: RealtimeSessionState) => {
+  const targetId = `realtime:${session.sessionId}`
+  setTextSearchLoadedTargets(
+    [{
+      id: targetId,
+      label: `realtime/${session.sessionId}.log`,
+      fileName: `realtime-${session.sessionId}.log`,
+      content: session.lines.join('\n'),
+    }],
+    targetId,
+  )
+}
+
+const postToParent = (payload: JsonRpcMessage) => {
+  if (window.parent === window) return
+  window.parent.postMessage(JSON.stringify(payload), '*')
+}
+
+const sendJsonRpcNotification = (method: string, params?: unknown) => {
+  const payload: JsonRpcNotification = { jsonrpc: '2.0', method }
+  if (params !== undefined) payload.params = params
+  postToParent(payload)
+}
+
+const sendJsonRpcResult = (id: JsonRpcId, result: unknown) => {
+  postToParent({ jsonrpc: '2.0', id, result })
+}
+
+const sendJsonRpcError = (id: JsonRpcId, code: number, messageText: string, data?: unknown) => {
+  const payload: JsonRpcResponseError = {
+    jsonrpc: '2.0',
+    id,
+    error: {
+      code,
+      message: messageText,
+    },
+  }
+  if (data !== undefined) payload.error.data = data
+  postToParent(payload)
+}
+
+const sendBridgeReady = () => {
+  sendJsonRpcNotification('bridge.ready', {
+    protocolVersion: 1,
+    from: 'maa-log-analyzer',
+    capabilities: [
+      'bridge.updateTheme',
+      'bridge.keydown',
+      'realtime.start',
+      'realtime.push',
+      'realtime.end',
+      'realtime.snapshot.end',
+    ],
+  })
+}
 const pickPreferredLogTargetId = (targets: TextSearchLoadedTarget[]): string => {
   if (targets.length === 0) return ''
   const normalize = (name: string) => name.toLowerCase()
@@ -173,6 +356,348 @@ const parseProgress = ref(0)
 const showParsingModal = ref(false)
 const showFileLoadingModal = ref(false)
 
+const resetSelectionState = () => {
+  selectedTask.value = null
+  selectedNode.value = null
+  selectedRecognitionIndex.value = null
+  selectedNestedIndex.value = null
+  selectedActionIndex.value = null
+  selectedNestedActionIndex.value = null
+  isActionOnlyView.value = false
+  pendingScrollNodeId.value = null
+}
+
+const resetAnalysisState = () => {
+  tasks.value = []
+  resetSelectionState()
+  availableProcessIds.value = []
+  availableThreadIds.value = []
+}
+
+const applyParsedTasks = (nextTasks: TaskInfo[], preserveSelection: boolean) => {
+  const prevSelectedTaskId = preserveSelection ? selectedTask.value?.task_id : null
+  const prevSelectedNodeId = preserveSelection ? selectedNode.value?.node_id : null
+
+  tasks.value = nextTasks
+  availableProcessIds.value = parser.getProcessIds()
+  availableThreadIds.value = parser.getThreadIds()
+
+  if (nextTasks.length === 0) {
+    resetSelectionState()
+    return
+  }
+
+  if (prevSelectedTaskId != null) {
+    const matchedTask = nextTasks.find(task => task.task_id === prevSelectedTaskId)
+    if (matchedTask) {
+      selectedTask.value = matchedTask
+      if (prevSelectedNodeId != null) {
+        selectedNode.value = matchedTask.nodes.find(node => node.node_id === prevSelectedNodeId) || null
+      } else {
+        selectedNode.value = null
+      }
+      return
+    }
+  }
+
+  selectedTask.value = nextTasks[0]
+  selectedNode.value = null
+  selectedRecognitionIndex.value = null
+  selectedNestedIndex.value = null
+  selectedActionIndex.value = null
+  selectedNestedActionIndex.value = null
+  isActionOnlyView.value = false
+}
+
+const stopRealtimeSession = () => {
+  realtimeSession.value = null
+  realtimeReparseRequested.value = false
+  realtimeParsing.value = false
+  realtimeStreaming.value = false
+  if (realtimeParseTimer != null) {
+    window.clearTimeout(realtimeParseTimer)
+    realtimeParseTimer = null
+  }
+}
+
+const runRealtimeParse = async () => {
+  if (realtimeParsing.value) {
+    realtimeReparseRequested.value = true
+    return
+  }
+
+  const session = realtimeSession.value
+  if (!session) return
+
+  realtimeParsing.value = true
+  try {
+    const content = session.lines.join('\n')
+    await parser.parseFile(content)
+    const parsedTasks = parser.getTasks()
+    applyParsedTasks(parsedTasks, true)
+    syncRealtimeLoadedTarget(session)
+  } catch (error) {
+    console.warn('[realtime] parse failed:', error)
+  } finally {
+    realtimeParsing.value = false
+    if (realtimeReparseRequested.value) {
+      realtimeReparseRequested.value = false
+      if (realtimeSession.value) {
+        realtimeParseTimer = window.setTimeout(() => {
+          realtimeParseTimer = null
+          void runRealtimeParse()
+        }, 80)
+      }
+    }
+  }
+}
+
+const scheduleRealtimeParse = () => {
+  if (realtimeParseTimer != null) return
+  realtimeParseTimer = window.setTimeout(() => {
+    realtimeParseTimer = null
+    void runRealtimeParse()
+  }, 80)
+}
+
+const handleRealtimeStart = (params: unknown) => {
+  const payload = asRecord(params)
+  if (!payload) return
+
+  const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
+  if (!sessionId) return
+
+  if (realtimeParseTimer != null) {
+    window.clearTimeout(realtimeParseTimer)
+    realtimeParseTimer = null
+  }
+  realtimeReparseRequested.value = false
+
+  realtimeSession.value = {
+    sessionId,
+    startedAt: toFiniteNumber(payload.startedAt, Date.now()),
+    lastSeq: 0,
+    lines: [],
+  }
+  realtimeStreaming.value = true
+
+  parser.setErrorImages(new Map())
+  parser.setVisionImages(new Map())
+  parser.setWaitFreezesImages(new Map())
+  resetAnalysisState()
+  selectedProcessId.value = ''
+  selectedThreadId.value = ''
+  syncRealtimeLoadedTarget(realtimeSession.value)
+}
+
+const handleRealtimePush = (params: unknown) => {
+  const payload = asRecord(params)
+  if (!payload) return
+
+  const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
+  if (!sessionId) return
+
+  if (!realtimeSession.value || realtimeSession.value.sessionId !== sessionId) {
+    handleRealtimeStart({
+      sessionId,
+      startedAt: Date.now(),
+    })
+  }
+
+  const session = realtimeSession.value
+  if (!session) return
+
+  const rawEvents = Array.isArray(payload.events) ? payload.events : []
+  if (rawEvents.length === 0) return
+
+  const events: RealtimeEventItem[] = []
+  for (const rawEvent of rawEvents) {
+    const eventRecord = asRecord(rawEvent)
+    if (!eventRecord) continue
+    if (typeof eventRecord.seq !== 'number' || !Number.isFinite(eventRecord.seq)) continue
+    if (typeof eventRecord.msg !== 'string' || !eventRecord.msg.trim()) continue
+    const details = asRecord(eventRecord.details) ?? {}
+    events.push({
+      seq: eventRecord.seq,
+      at: toFiniteNumber(eventRecord.at, Date.now()),
+      msg: eventRecord.msg,
+      details,
+    })
+  }
+
+  if (events.length === 0) return
+  events.sort((a, b) => a.seq - b.seq)
+
+  let appended = 0
+  for (const event of events) {
+    if (event.seq <= session.lastSeq) continue
+    const line = toSyntheticEventLine(event)
+    if (!line) continue
+    session.lines.push(line)
+    session.lastSeq = event.seq
+    appended++
+  }
+
+  if (appended === 0) return
+  syncRealtimeLoadedTarget(session)
+  scheduleRealtimeParse()
+}
+
+const handleRealtimeEnd = (params: unknown) => {
+  const payload = asRecord(params)
+  if (!payload) return
+
+  const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : ''
+  if (!sessionId || !realtimeSession.value || realtimeSession.value.sessionId !== sessionId) return
+
+  realtimeStreaming.value = false
+  scheduleRealtimeParse()
+}
+
+const handleBridgeUpdateTheme = (params: unknown) => {
+  const payload = asRecord(params)
+  if (!payload) return
+
+  if (typeof payload.htmlStyle === 'string') {
+    if (payload.htmlStyle.trim()) {
+      document.documentElement.setAttribute('style', payload.htmlStyle)
+    } else {
+      document.documentElement.removeAttribute('style')
+    }
+  }
+
+  if (typeof payload.bodyClass === 'string') {
+    document.body.setAttribute('class', payload.bodyClass)
+  }
+}
+
+const handleBridgeKeydown = (params: unknown) => {
+  const payload = asRecord(params)
+  if (!payload) return
+
+  const eventInit: KeyboardEventInit = {
+    key: typeof payload.key === 'string' ? payload.key : '',
+    code: typeof payload.code === 'string' ? payload.code : '',
+    altKey: payload.altKey === true,
+    ctrlKey: payload.ctrlKey === true,
+    shiftKey: payload.shiftKey === true,
+    metaKey: payload.metaKey === true,
+    repeat: payload.repeat === true,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+  }
+  const keydownEvent = new KeyboardEvent('keydown', eventInit)
+  document.dispatchEvent(keydownEvent)
+}
+
+const toJsonRpcMessage = (raw: unknown): JsonRpcMessage | null => {
+  let parsed: unknown = raw
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return null
+    }
+  }
+
+  const record = asRecord(parsed)
+  if (!record || record.jsonrpc !== '2.0') return null
+
+  if (typeof record.method === 'string') {
+    if (Object.prototype.hasOwnProperty.call(record, 'id')) {
+      return {
+        jsonrpc: '2.0',
+        id: (record.id as JsonRpcId) ?? null,
+        method: record.method,
+        params: record.params,
+      }
+    }
+    return {
+      jsonrpc: '2.0',
+      method: record.method,
+      params: record.params,
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(record, 'id')) {
+    if (Object.prototype.hasOwnProperty.call(record, 'error')) {
+      const errorRecord = asRecord(record.error)
+      if (!errorRecord || typeof errorRecord.code !== 'number' || typeof errorRecord.message !== 'string') {
+        return null
+      }
+      return {
+        jsonrpc: '2.0',
+        id: (record.id as JsonRpcId) ?? null,
+        error: {
+          code: errorRecord.code,
+          message: errorRecord.message,
+          data: errorRecord.data,
+        },
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(record, 'result')) {
+      return {
+        jsonrpc: '2.0',
+        id: (record.id as JsonRpcId) ?? null,
+        result: record.result,
+      }
+    }
+  }
+
+  return null
+}
+
+const handleJsonRpcMethod = async (method: string, params: unknown, id?: JsonRpcId) => {
+  switch (method) {
+    case 'bridge.hello':
+      sendBridgeReady()
+      if (id !== undefined) sendJsonRpcResult(id, { ok: true })
+      return
+    case 'bridge.updateTheme':
+      handleBridgeUpdateTheme(params)
+      if (id !== undefined) sendJsonRpcResult(id, { ok: true })
+      return
+    case 'bridge.keydown':
+      handleBridgeKeydown(params)
+      if (id !== undefined) sendJsonRpcResult(id, { ok: true })
+      return
+    case 'realtime.start':
+      handleRealtimeStart(params)
+      if (id !== undefined) sendJsonRpcResult(id, { ok: true })
+      return
+    case 'realtime.push':
+      handleRealtimePush(params)
+      if (id !== undefined) sendJsonRpcResult(id, { ok: true })
+      return
+    case 'realtime.end':
+      handleRealtimeEnd(params)
+      if (id !== undefined) sendJsonRpcResult(id, { ok: true })
+      return
+    case 'realtime.snapshot.end':
+      if (id !== undefined) sendJsonRpcResult(id, { ok: true })
+      return
+    default:
+      if (id !== undefined) {
+        sendJsonRpcError(id, -32601, `Method not found: ${method}`)
+      }
+  }
+}
+
+const handleRpcMessageEvent = (event: MessageEvent) => {
+  // 嵌入 iframe 时，优先接收 parent 消息；同时允许本窗口 postMessage 便于本地调试
+  if (window.parent !== window && event.source !== window.parent && event.source !== window) return
+  const message = toJsonRpcMessage(event.data)
+  if (!message) return
+
+  if ('method' in message) {
+    if ('id' in message) {
+      void handleJsonRpcMethod(message.method, message.params, message.id)
+    } else {
+      void handleJsonRpcMethod(message.method, message.params)
+    }
+  }
+}
 // 过滤器状态
 const selectedProcessId = ref<string>('')
 const selectedThreadId = ref<string>('')
@@ -569,16 +1094,11 @@ const processLogContent = async (
   loadedTargets?: TextSearchLoadedTarget[],
   loadedDefaultTargetId?: string,
 ) => {
+  // 文件模式会接管数据源，先停止实时会话
+  stopRealtimeSession()
+
   // 清空所有状态，确保重新上传文件时不会显示旧数据
-  tasks.value = []
-  selectedTask.value = null
-  selectedNode.value = null
-  selectedRecognitionIndex.value = null
-  selectedNestedIndex.value = null
-  availableProcessIds.value = []
-  availableThreadIds.value = []
-  selectedProcessId.value = ''
-  selectedThreadId.value = ''
+  resetAnalysisState()
 
   // 更新文本搜索默认数据源（优先使用调用方提供的目标列表）
   const fallbackTargets: TextSearchLoadedTarget[] = [{
@@ -616,21 +1136,14 @@ const processLogContent = async (
     await parser.parseFile(content, (progress) => {
       parseProgress.value = progress.percentage
     })
-
-    // 解析完成，获取任务
-    tasks.value = parser.getTasks()
-
-    // 收集可用的进程和线程ID
-    availableProcessIds.value = parser.getProcessIds()
-    availableThreadIds.value = parser.getThreadIds()
+    const parsedTasks = parser.getTasks()
+    applyParsedTasks(parsedTasks, false)
 
     // 清除过滤器
     selectedProcessId.value = ''
     selectedThreadId.value = ''
 
-    if (tasks.value.length > 0) {
-      selectedTask.value = tasks.value[0]
-    } else {
+    if (parsedTasks.length === 0) {
       message.warning('未能解析出有效的任务数据，请检查日志文件格式是否正确', { duration: 5000 })
     }
   } finally {
@@ -877,6 +1390,8 @@ watch([splitSize, detailViewCollapsed, splitVerticalSize], ([currentSplitSize, c
 onMounted(() => {
   window.addEventListener('resize', handleTourViewportChange)
   window.addEventListener('scroll', handleTourViewportChange, true)
+  window.addEventListener('message', handleRpcMessageEvent)
+  sendBridgeReady()
 
   if (!tutorialAutoStarted.value && !hasCompletedCurrentTutorialVersion()) {
     tutorialAutoStarted.value = true
@@ -887,6 +1402,11 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleTourViewportChange)
   window.removeEventListener('scroll', handleTourViewportChange, true)
+  window.removeEventListener('message', handleRpcMessageEvent)
+  if (realtimeParseTimer != null) {
+    window.clearTimeout(realtimeParseTimer)
+    realtimeParseTimer = null
+  }
 })
 </script>
 
@@ -1035,6 +1555,7 @@ onBeforeUnmount(() => {
             :parser="parser"
             :is-mobile="true"
             :pending-scroll-node-id="pendingScrollNodeId"
+            :is-realtime-streaming="isRealtimeContext"
             @select-task="handleSelectTask"
             @upload-file="handleFileUpload"
             @upload-content="handleContentUpload"
@@ -1134,6 +1655,7 @@ onBeforeUnmount(() => {
               :detail-view-collapsed="detailViewCollapsed"
               :on-expand-detail-view="toggleDetailView"
               :pending-scroll-node-id="pendingScrollNodeId"
+            :is-realtime-streaming="isRealtimeContext"
               @select-task="handleSelectTask"
               @upload-file="handleFileUpload"
               @upload-content="handleContentUpload"
@@ -1229,6 +1751,7 @@ onBeforeUnmount(() => {
                   :detail-view-collapsed="detailViewCollapsed"
                   :on-expand-detail-view="toggleDetailView"
                   :pending-scroll-node-id="pendingScrollNodeId"
+            :is-realtime-streaming="isRealtimeContext"
                   @select-task="handleSelectTask"
                   @upload-file="handleFileUpload"
                   @upload-content="handleContentUpload"
