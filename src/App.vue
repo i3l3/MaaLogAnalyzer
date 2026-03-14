@@ -73,13 +73,8 @@ const allViewModeOptions = [
   }
 ]
 
-// 视图模式选项（mobile 下过滤掉 split）
-const viewModeOptions = computed(() => {
-  if (isMobile.value) {
-    return allViewModeOptions.filter(opt => opt.key !== 'split')
-  }
-  return allViewModeOptions
-})
+// 视图模式选项
+const viewModeOptions = computed(() => allViewModeOptions)
 
 // 当前视图模式的显示文本
 const currentViewLabel = computed(() => {
@@ -89,11 +84,7 @@ const currentViewLabel = computed(() => {
 
 // 处理视图模式切换
 const handleViewModeSelect = (key: string) => {
-  if (isMobile.value && key === 'split') {
-    viewMode.value = 'analysis'
-  } else {
-    viewMode.value = key as ViewMode
-  }
+  viewMode.value = key as ViewMode
 }
 
 const APP_LAYOUT_STORAGE_KEY = 'maa-log-analyzer-app-layout'
@@ -1732,7 +1723,118 @@ onBeforeUnmount(() => {
 
       <!-- 分屏模式 -->
       <div v-show="viewMode === 'split'" data-tour="split-main" style="height: 100%">
+        <template v-if="isMobile">
+          <n-split
+            direction="vertical"
+            v-model:size="splitVerticalSize"
+            :min="0.25"
+            :max="0.75"
+            style="height: 100%"
+          >
+            <template #1>
+              <process-view
+                :tasks="filteredTasks"
+                :selected-task="selectedTask"
+                :loading="loading"
+                :parser="parser"
+                :is-mobile="true"
+                :pending-scroll-node-id="pendingScrollNodeId"
+                :is-realtime-streaming="isRealtimeContext"
+                @select-task="handleSelectTask"
+                @upload-file="handleFileUpload"
+                @upload-content="handleContentUpload"
+                @select-node="handleSelectNode"
+                @select-action="handleSelectAction"
+                @select-recognition="handleSelectRecognition"
+                @select-nested="handleSelectNested"
+                @select-nested-action="handleSelectNestedAction"
+                @file-loading-start="handleFileLoadingStart"
+                @file-loading-end="handleFileLoadingEnd"
+                @open-task-drawer="showTaskDrawer = true"
+                @scroll-done="pendingScrollNodeId = null"
+              />
+            </template>
+            <template #2>
+              <text-search-view
+                v-if="viewMode === 'split'"
+                :is-dark="isDark"
+                :loaded-targets="textSearchLoadedTargets"
+                :loaded-default-target-id="textSearchLoadedDefaultTargetId"
+                style="height: 100%"
+              />
+            </template>
+          </n-split>
+
+          <!-- 左侧任务抽屉 -->
+          <n-drawer
+            v-model:show="showTaskDrawer"
+            placement="left"
+            :width="280"
+          >
+            <n-drawer-content title="任务列表">
+              <n-scrollbar style="height: 100%">
+                <n-list hoverable clickable>
+                  <n-list-item
+                    v-for="(task, index) in filteredTasks"
+                    :key="task.task_id"
+                    @click="handleMobileSelectTask(task)"
+                    :style="{
+                      backgroundColor: selectedTask?.task_id === task.task_id ? 'var(--n-color-target)' : 'transparent',
+                      cursor: 'pointer',
+                      padding: '12px 16px'
+                    }"
+                  >
+                    <n-flex vertical style="gap: 8px">
+                      <n-flex align="center" justify="space-between">
+                        <n-text strong style="font-size: 15px">{{ task.entry }}</n-text>
+                        <n-tag size="small" :type="task.status === 'succeeded' ? 'success' : task.status === 'failed' ? 'error' : 'warning'">
+                          #{{ index + 1 }}
+                        </n-tag>
+                      </n-flex>
+                      <n-flex vertical style="gap: 4px">
+                        <n-text depth="3" style="font-size: 12px">
+                          状态:
+                          <n-text :type="task.status === 'succeeded' ? 'success' : task.status === 'failed' ? 'error' : 'warning'">
+                            {{ task.status === 'succeeded' ? '成功' : task.status === 'failed' ? '失败' : '运行中' }}
+                          </n-text>
+                        </n-text>
+                        <n-text depth="3" style="font-size: 12px">
+                          节点: {{ task.nodes.length }} 个
+                        </n-text>
+                        <n-text depth="3" style="font-size: 12px" v-if="task.duration">
+                          耗时: {{ formatDuration(task.duration) }}
+                        </n-text>
+                      </n-flex>
+                    </n-flex>
+                  </n-list-item>
+                </n-list>
+              </n-scrollbar>
+            </n-drawer-content>
+          </n-drawer>
+
+          <!-- 底部详情抽屉 -->
+          <n-drawer
+            v-model:show="showDetailDrawer"
+            placement="bottom"
+            :default-height="400"
+            resizable
+          >
+            <n-drawer-content title="详细信息">
+              <detail-view
+                :selected-node="selectedNode"
+                :selected-recognition-index="selectedRecognitionIndex"
+                :selected-nested-index="selectedNestedIndex"
+                :selected-action-index="selectedActionIndex"
+                :selected-nested-action-index="selectedNestedActionIndex"
+                :is-action-only-view="isActionOnlyView"
+                style="height: 100%"
+              />
+            </n-drawer-content>
+          </n-drawer>
+        </template>
+
         <n-split
+          v-else
           direction="vertical"
           v-model:size="splitVerticalSize"
           :min="0.2"
@@ -1756,7 +1858,7 @@ onBeforeUnmount(() => {
                   :detail-view-collapsed="detailViewCollapsed"
                   :on-expand-detail-view="toggleDetailView"
                   :pending-scroll-node-id="pendingScrollNodeId"
-            :is-realtime-streaming="isRealtimeContext"
+                  :is-realtime-streaming="isRealtimeContext"
                   @select-task="handleSelectTask"
                   @upload-file="handleFileUpload"
                   @upload-content="handleContentUpload"
@@ -1810,7 +1912,6 @@ onBeforeUnmount(() => {
         </n-split>
       </div>
     </div>
-
     <!-- 设置对话框 -->
     <n-modal
       v-model:show="showSettingsModal"
@@ -1958,4 +2059,3 @@ onBeforeUnmount(() => {
     </n-modal>
   </div>
 </template>
-
