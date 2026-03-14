@@ -156,6 +156,43 @@ const applyLoadedTarget = async (target: LoadedSearchTarget | undefined) => {
   }
 }
 
+const ensureLoadedTargetReady = async (): Promise<boolean> => {
+  if (sourceMode.value !== 'loaded') {
+    return Boolean(fileName.value && (fileContent.value || fileHandle.value))
+  }
+
+  const targets = props.loadedTargets ?? []
+  if (targets.length === 0) return false
+
+  const selectedExists = selectedLoadedTargetId.value
+    ? targets.some(item => item.id === selectedLoadedTargetId.value)
+    : false
+
+  let targetId = selectedExists ? selectedLoadedTargetId.value : ''
+  if (!targetId) {
+    targetId = props.loadedDefaultTargetId && targets.some(item => item.id === props.loadedDefaultTargetId)
+      ? props.loadedDefaultTargetId
+      : targets[0].id
+  }
+  if (!targetId) return false
+
+  if (selectedLoadedTargetId.value !== targetId) {
+    selectedLoadedTargetId.value = targetId
+  }
+
+  const target = targets.find(item => item.id === targetId)
+  if (!target) return false
+
+  const expectedName = target.fileName || target.label
+  const contentReady = Boolean(fileName.value && (fileContent.value || fileHandle.value))
+  const sameTargetLoaded = fileName.value === expectedName
+  if (!contentReady || !sameTargetLoaded) {
+    await applyLoadedTarget(target)
+  }
+
+  return Boolean(fileName.value && (fileContent.value || fileHandle.value))
+}
+
 watch(
   () => [props.loadedTargets, props.loadedDefaultTargetId] as const,
   async ([targets, defaultId]) => {
@@ -186,7 +223,6 @@ watch(
   },
   { immediate: true, deep: true }
 )
-
 watch(selectedLoadedTargetId, async (id) => {
   if (sourceMode.value !== 'loaded') return
   const target = (props.loadedTargets ?? []).find(item => item.id === id)
@@ -302,9 +338,15 @@ const performSearch = async () => {
     return
   }
 
-  // 检查是否有文件
-  if (!fileName.value || (!fileContent.value && !fileHandle.value)) {
-    alert(sourceMode.value === 'loaded' ? '请先选择已加载目标文件' : '请先选择文件')
+  // 检查是否有文件；loaded 模式下尝试自动补齐默认目标
+  if (sourceMode.value === 'loaded') {
+    const ready = await ensureLoadedTargetReady()
+    if (!ready) {
+      alert('请先选择已加载目标文件')
+      return
+    }
+  } else if (!fileName.value || (!fileContent.value && !fileHandle.value)) {
+    alert('请先选择文件')
     return
   }
   
