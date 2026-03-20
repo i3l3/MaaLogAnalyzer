@@ -19,7 +19,7 @@ const emit = defineEmits<{
 
 // Recognition 摘要
 const recognitionSummary = computed(() => {
-  const list = props.mergedRecognitionList
+  const list = props.mergedRecognitionList.filter(i => !i.isRoundSeparator)
   if (list.length === 0) return null
   const tried = list.filter(i => i.status !== 'not-recognized').length
   const matched = list.find(i => i.status === 'success')

@@ -71,10 +71,14 @@ const flatNestedActions = computed(() => {
         <li
           v-for="(item, idx) in mergedRecognitionList"
           :key="`tree-reco-${idx}`"
-          class="tree-item"
+          :class="['tree-item', item.isRoundSeparator ? 'tree-item-round-separator' : '']"
         >
+          <n-text v-if="item.isRoundSeparator" depth="3" class="tree-round-separator-text">
+            {{ item.name }}
+          </n-text>
+
           <!-- 未识别的节点 -->
-          <n-text v-if="item.status === 'not-recognized'" depth="3" style="font-size: 12px; opacity: 0.5">{{ item.name }}</n-text>
+          <n-text v-else-if="item.status === 'not-recognized'" depth="3" style="font-size: 12px; opacity: 0.5">{{ item.name }}</n-text>
 
           <!-- 已识别、无嵌套 -->
           <template v-else-if="!item.hasNestedNodes">
@@ -242,5 +246,22 @@ const flatNestedActions = computed(() => {
   top: 12px;
   width: 12px;
   border-bottom: 1px solid var(--n-border-color, rgba(255, 255, 255, 0.12));
+}
+
+.tree-item-round-separator {
+  padding-top: 6px;
+  padding-bottom: 4px;
+}
+
+.tree-item-round-separator::before {
+  border-bottom: none;
+}
+
+.tree-round-separator-text {
+  display: block;
+  font-size: 12px;
+  text-align: center;
+  letter-spacing: 0.5px;
+  opacity: 0.9;
 }
 </style>

@@ -45,9 +45,18 @@ const emit = defineEmits<{
 
     <n-flex vertical style="gap: 8px">
       <template v-for="(item, idx) in mergedRecognitionList" :key="`merged-${idx}`">
+        <!-- 轮次分隔 -->
+        <n-text
+          v-if="item.isRoundSeparator && recognitionExpanded"
+          depth="3"
+          class="round-separator"
+        >
+          {{ item.name }}
+        </n-text>
+
         <!-- 未识别的节点 -->
         <n-button
-          v-if="recognitionExpanded && item.status === 'not-recognized'"
+          v-else-if="recognitionExpanded && item.status === 'not-recognized'"
           size="small"
           type="default"
           ghost
@@ -263,3 +272,14 @@ const emit = defineEmits<{
     </n-flex>
   </n-card>
 </template>
+
+<style scoped>
+.round-separator {
+  display: block;
+  width: 100%;
+  padding: 4px 0;
+  text-align: center;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+</style>

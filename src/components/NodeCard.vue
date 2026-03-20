@@ -65,56 +65,105 @@ const isExpanded = (attemptIndex: number) => {
 const mergedRecognitionList = computed<MergedRecognitionItem[]>(() => {
   const result: MergedRecognitionItem[] = []
 
-  const attemptMap = new Map<string, Array<{ attempt: RecognitionAttempt, index: number }>>()
-  if (props.node.recognition_attempts) {
-    props.node.recognition_attempts.forEach((attempt, idx) => {
-      const entries = attemptMap.get(attempt.name)
-      if (entries) {
-        entries.push({ attempt, index: idx })
-      } else {
-        attemptMap.set(attempt.name, [{ attempt, index: idx }])
-      }
-    })
-  }
+  const attempts = props.node.recognition_attempts ?? []
+  const nextList = props.node.next_list ?? []
 
-  if (props.node.next_list && props.node.next_list.length > 0) {
-    props.node.next_list.forEach((nextItem) => {
-      const prefixes: string[] = []
-      if (nextItem.anchor) prefixes.push('[Anchor]')
-      if (nextItem.jump_back) prefixes.push('[JumpBack]')
-      const displayName = prefixes.length > 0 ? `${prefixes.join('')} ${nextItem.name}` : nextItem.name
-
-      const entries = attemptMap.get(nextItem.name)
-      if (entries) {
-        for (const attemptInfo of entries) {
-          result.push({
-            name: displayName,
-            status: attemptInfo.attempt.status,
-            attemptIndex: attemptInfo.index,
-            attempt: attemptInfo.attempt,
-            hasNestedNodes: attemptInfo.attempt.nested_nodes && attemptInfo.attempt.nested_nodes.length > 0
-          })
-        }
-      } else {
+  if (!attempts.length) {
+    if (nextList.length > 0) {
+      nextList.forEach((nextItem) => {
+        const prefixes: string[] = []
+        if (nextItem.anchor) prefixes.push('[Anchor]')
+        if (nextItem.jump_back) prefixes.push('[JumpBack]')
+        const displayName = prefixes.length > 0 ? `${prefixes.join('')} ${nextItem.name}` : nextItem.name
         result.push({
           name: displayName,
           status: 'not-recognized'
         })
-      }
-    })
-  } else {
-    if (props.node.recognition_attempts) {
-      props.node.recognition_attempts.forEach((attempt, idx) => {
-        result.push({
-          name: attempt.name,
-          status: attempt.status,
-          attemptIndex: idx,
-          attempt: attempt,
-          hasNestedNodes: attempt.nested_nodes && attempt.nested_nodes.length > 0
-        })
       })
     }
+    return result
   }
+
+  // 多轮识别：先按尝试序列切分轮次，再在轮内按 next_list 顺序展示。
+  const nextIndexMap = new Map<string, number>()
+  const nextDisplayMap = new Map<string, string>()
+  nextList.forEach((nextItem, idx) => {
+    if (!nextIndexMap.has(nextItem.name)) {
+      nextIndexMap.set(nextItem.name, idx)
+      const prefixes: string[] = []
+      if (nextItem.anchor) prefixes.push('[Anchor]')
+      if (nextItem.jump_back) prefixes.push('[JumpBack]')
+      const displayName = prefixes.length > 0 ? `${prefixes.join('')} ${nextItem.name}` : nextItem.name
+      nextDisplayMap.set(nextItem.name, displayName)
+    }
+  })
+
+  type RoundAttempt = { attempt: RecognitionAttempt; index: number }
+  const rounds: RoundAttempt[][] = [[]]
+  let currentRound = 0
+  let expectedNextIndex = 0
+
+  attempts.forEach((attempt, index) => {
+    const nextIndex = nextIndexMap.get(attempt.name)
+    const hasRoundData = rounds[currentRound].length > 0
+
+    // 命中 next_list 顺序回退时，认为进入新一轮。
+    if (hasRoundData && nextIndex != null && nextIndex < expectedNextIndex) {
+      rounds.push([])
+      currentRound += 1
+      expectedNextIndex = 0
+    }
+
+    rounds[currentRound].push({ attempt, index })
+
+    if (nextIndex != null) {
+      expectedNextIndex = nextIndex + 1
+    }
+
+    // 命中成功后通常进入下一轮（同节点重试场景）。
+    if (attempt.status === 'success') {
+      rounds.push([])
+      currentRound += 1
+      expectedNextIndex = 0
+    }
+  })
+
+  while (rounds.length > 0 && rounds[rounds.length - 1].length === 0) {
+    rounds.pop()
+  }
+
+  const useRoundSeparator = rounds.length > 1
+
+  rounds.forEach((roundAttempts, roundIdx) => {
+    if (useRoundSeparator) {
+      result.push({
+        name: `—— 第 ${roundIdx + 1} 轮 ——`,
+        status: 'not-recognized',
+        isRoundSeparator: true,
+        roundIndex: roundIdx + 1,
+      })
+    }
+
+    const ordered = [...roundAttempts].sort((a, b) => {
+      const ai = nextIndexMap.get(a.attempt.name)
+      const bi = nextIndexMap.get(b.attempt.name)
+      const aOrder = ai == null ? Number.MAX_SAFE_INTEGER : ai
+      const bOrder = bi == null ? Number.MAX_SAFE_INTEGER : bi
+      if (aOrder !== bOrder) return aOrder - bOrder
+      return a.index - b.index
+    })
+
+    ordered.forEach(({ attempt, index }) => {
+      const name = nextDisplayMap.get(attempt.name) ?? attempt.name
+      result.push({
+        name,
+        status: attempt.status,
+        attemptIndex: index,
+        attempt,
+        hasNestedNodes: !!(attempt.nested_nodes && attempt.nested_nodes.length > 0)
+      })
+    })
+  })
 
   return result
 })

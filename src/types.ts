@@ -114,6 +114,8 @@ export interface RecognitionDetail {
 export interface MergedRecognitionItem {
   name: string
   status: 'success' | 'failed' | 'not-recognized'
+  isRoundSeparator?: boolean
+  roundIndex?: number
   attemptIndex?: number  // 在 recognition_attempts 中的索引
   attempt?: RecognitionAttempt  // 原始 attempt 对象
   hasNestedNodes?: boolean
