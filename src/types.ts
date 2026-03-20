@@ -49,6 +49,8 @@ export interface RecognitionAttempt {
   reco_id: number
   name: string
   timestamp: string
+  start_timestamp?: string
+  end_timestamp?: string
   status: 'success' | 'failed'
   reco_details?: RecognitionDetail
   nested_nodes?: RecognitionAttempt[]
@@ -70,6 +72,8 @@ export interface NestedActionNode {
   node_id: number
   name: string
   timestamp: string
+  start_timestamp?: string
+  end_timestamp?: string
   status: 'success' | 'failed'
   reco_details?: RecognitionDetail
   action_details?: ActionDetail
@@ -81,6 +85,8 @@ export interface NodeInfo {
   node_id: number
   name: string
   timestamp: string
+  start_timestamp?: string
+  end_timestamp?: string
   status: 'success' | 'failed'
   task_id: number
   reco_details?: RecognitionDetail
@@ -129,4 +135,6 @@ export interface ActionDetail {
   detail: any
   name: string
   success: boolean
+  start_timestamp?: string
+  end_timestamp?: string
 }

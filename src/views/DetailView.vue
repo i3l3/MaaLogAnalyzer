@@ -75,6 +75,15 @@ const currentAttempt = computed(() => {
   return attempt || null
 })
 
+const pickStartTime = (startTimestamp?: string | null, fallbackTimestamp?: string | null, finalFallback?: string | null): string => {
+  return startTimestamp || fallbackTimestamp || finalFallback || '-'
+}
+
+const recognitionExecutionTime = computed(() => {
+  const attempt = currentAttempt.value as any
+  return pickStartTime(attempt?.start_timestamp, attempt?.timestamp, attempt?.end_timestamp)
+})
+
 // 当前显示的识别详情（可能是选中的识别尝试、嵌套节点，或节点的最终识别）
 const currentRecognition = computed(() => {
   if (!props.selectedNode) return null
@@ -134,6 +143,19 @@ const currentActionDetails = computed(() => {
   return props.selectedNode.action_details || null
 })
 
+const actionExecutionTime = computed(() => {
+  if (!props.selectedNode) return '-'
+  const actionDetails = currentActionDetails.value as any
+  if (actionDetails?.start_timestamp || actionDetails?.end_timestamp) {
+    return pickStartTime(actionDetails.start_timestamp, actionDetails.end_timestamp)
+  }
+  const attempt = currentAttempt.value as any
+  if (attempt?.start_timestamp || attempt?.end_timestamp || attempt?.timestamp) {
+    return pickStartTime(attempt.start_timestamp, attempt.timestamp, attempt.end_timestamp)
+  }
+  return pickStartTime(props.selectedNode.start_timestamp, props.selectedNode.timestamp, props.selectedNode.end_timestamp)
+})
+
 // 是否选中了特定的识别尝试或嵌套动作节点
 const isRecognitionAttemptSelected = computed(() => {
   return props.selectedRecognitionIndex != null || isNestedActionSelected.value
@@ -144,6 +166,15 @@ const currentNestedAction = computed(() => {
   if (!isNestedActionSelected.value || !props.selectedNode) return null
   const group = props.selectedNode.nested_action_nodes?.[props.selectedActionIndex!]
   return group?.nested_actions?.[props.selectedNestedActionIndex!] || null
+})
+
+const nestedActionExecutionTime = computed(() => {
+  const nestedAction = currentNestedAction.value as any
+  return pickStartTime(nestedAction?.start_timestamp, nestedAction?.timestamp, nestedAction?.end_timestamp)
+})
+
+const nodeExecutionTime = computed(() => {
+  return pickStartTime(props.selectedNode?.start_timestamp, props.selectedNode?.timestamp, props.selectedNode?.end_timestamp)
 })
 
 // 嵌套动作节点选中但无识别/动作详情时的 fallback
@@ -206,7 +237,7 @@ const copyToClipboard = (text: string) => {
             </n-descriptions-item>
 
             <n-descriptions-item label="执行时间">
-              {{ currentAttempt?.timestamp || '-' }}
+              {{ recognitionExecutionTime }}
             </n-descriptions-item>
 
             <n-descriptions-item label="识别位置" v-if="currentRecognition?.box">
@@ -276,7 +307,7 @@ const copyToClipboard = (text: string) => {
             </n-descriptions-item>
 
             <n-descriptions-item label="执行时间">
-              {{ currentAttempt?.timestamp || '-' }}
+              {{ actionExecutionTime }}
             </n-descriptions-item>
 
             <n-descriptions-item label="目标位置" :span="descriptionColumns" v-if="currentActionDetails?.box">
@@ -339,7 +370,7 @@ const copyToClipboard = (text: string) => {
             </n-descriptions-item>
 
             <n-descriptions-item label="执行时间">
-              {{ currentNestedAction!.timestamp }}
+              {{ nestedActionExecutionTime }}
             </n-descriptions-item>
 
             <n-descriptions-item label="节点 ID">
@@ -397,7 +428,7 @@ const copyToClipboard = (text: string) => {
             </n-descriptions-item>
 
             <n-descriptions-item label="执行时间">
-              {{ selectedNode.timestamp }}
+              {{ nodeExecutionTime }}
             </n-descriptions-item>
 
             <n-descriptions-item label="节点 ID">
