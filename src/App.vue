@@ -6,7 +6,7 @@ import DetailView from './views/DetailView.vue'
 import { LogParser } from './utils/logParser'
 import { getErrorMessage } from './utils/errorHandler'
 import type { LoadedTextFile } from './utils/fileDialog'
-import type { TaskInfo, NodeInfo } from './types'
+import type { TaskInfo, NodeInfo, UnifiedFlowItem } from './types'
 import { BulbOutlined, BulbFilled, FileSearchOutlined, BarChartOutlined, ColumnHeightOutlined, InfoCircleOutlined, GithubOutlined, DashboardOutlined, SettingOutlined, MenuOutlined, ApartmentOutlined, RobotOutlined } from '@vicons/antd'
 import { version } from '../package.json'
 import { useIsMobile } from './composables/useIsMobile'
@@ -342,29 +342,49 @@ const pickPreferredLogTargetId = (targets: TextSearchLoadedTarget[]): string => 
 const tasks = ref<TaskInfo[]>([])
 const selectedTask = ref<TaskInfo | null>(null)
 const selectedNode = ref<NodeInfo | null>(null)
-const selectedRecognitionIndex = ref<number | null>(null)
-const selectedNestedIndex = ref<number | null>(null)
-const selectedActionIndex = ref<number | null>(null)
-const selectedNestedActionIndex = ref<number | null>(null)
-const selectedActionRecognitionIndex = ref<number | null>(null)
-const selectedNestedActionRecognitionIndex = ref<number | null>(null)
-const isActionOnlyView = ref(false)
+const selectedFlowItemId = ref<string | null>(null)
 const loading = ref(false)
 const pendingScrollNodeId = ref<number | null>(null)
 const parseProgress = ref(0)
 const showParsingModal = ref(false)
 const showFileLoadingModal = ref(false)
 
+const flattenFlowItems = (items: UnifiedFlowItem[] | undefined, output: UnifiedFlowItem[] = []): UnifiedFlowItem[] => {
+  if (!items || items.length === 0) return output
+  for (const item of items) {
+    output.push(item)
+    if (item.children && item.children.length > 0) {
+      flattenFlowItems(item.children, output)
+    }
+  }
+  return output
+}
+
+const hasFlowItemId = (node: NodeInfo | null, flowItemId: string | null | undefined): boolean => {
+  if (!node || !flowItemId) return false
+  return flattenFlowItems(node.flow_items).some(item => item.id === flowItemId)
+}
+
+const pickMainActionFlowItemId = (node: NodeInfo): string | null => {
+  if (!node.action_details) return null
+  const actionId = node.action_details.action_id
+  const candidates = flattenFlowItems(node.flow_items).filter(item => item.type === 'action')
+  const exact = candidates.find(item => item.action_id === actionId && item.id.startsWith('node.action.'))
+  if (exact) return exact.id
+  const fallback = candidates.find(item => item.action_id === actionId)
+  if (fallback) return fallback.id
+  return `node.action.${actionId}`
+}
+
+const pickFlowId = (node: NodeInfo, preferredId: string): string | null => {
+  if (hasFlowItemId(node, preferredId)) return preferredId
+  return null
+}
+
 const resetSelectionState = () => {
   selectedTask.value = null
   selectedNode.value = null
-  selectedRecognitionIndex.value = null
-  selectedNestedIndex.value = null
-  selectedActionIndex.value = null
-  selectedNestedActionIndex.value = null
-  selectedActionRecognitionIndex.value = null
-  selectedNestedActionRecognitionIndex.value = null
-  isActionOnlyView.value = false
+  selectedFlowItemId.value = null
   pendingScrollNodeId.value = null
 }
 
@@ -378,6 +398,7 @@ const resetAnalysisState = () => {
 const applyParsedTasks = (nextTasks: TaskInfo[], preserveSelection: boolean) => {
   const prevSelectedTaskId = preserveSelection ? selectedTask.value?.task_id : null
   const prevSelectedNodeId = preserveSelection ? selectedNode.value?.node_id : null
+  const prevSelectedFlowItemId = preserveSelection ? selectedFlowItemId.value : null
 
   tasks.value = nextTasks
   availableProcessIds.value = parser.getProcessIds()
@@ -394,8 +415,14 @@ const applyParsedTasks = (nextTasks: TaskInfo[], preserveSelection: boolean) => 
       selectedTask.value = matchedTask
       if (prevSelectedNodeId != null) {
         selectedNode.value = matchedTask.nodes.find(node => node.node_id === prevSelectedNodeId) || null
+        if (selectedNode.value && hasFlowItemId(selectedNode.value, prevSelectedFlowItemId)) {
+          selectedFlowItemId.value = prevSelectedFlowItemId
+        } else {
+          selectedFlowItemId.value = null
+        }
       } else {
         selectedNode.value = null
+        selectedFlowItemId.value = null
       }
       return
     }
@@ -403,13 +430,7 @@ const applyParsedTasks = (nextTasks: TaskInfo[], preserveSelection: boolean) => 
 
   selectedTask.value = nextTasks[0]
   selectedNode.value = null
-  selectedRecognitionIndex.value = null
-  selectedNestedIndex.value = null
-  selectedActionIndex.value = null
-  selectedNestedActionIndex.value = null
-  selectedActionRecognitionIndex.value = null
-  selectedNestedActionRecognitionIndex.value = null
-  isActionOnlyView.value = false
+  selectedFlowItemId.value = null
 }
 
 const stopRealtimeSession = () => {
@@ -1165,26 +1186,14 @@ const processLogContent = async (
 const handleSelectTask = (task: TaskInfo) => {
   selectedTask.value = task
   selectedNode.value = null
-  selectedRecognitionIndex.value = null
-  selectedNestedIndex.value = null
-  selectedActionIndex.value = null
-  selectedNestedActionIndex.value = null
-  selectedActionRecognitionIndex.value = null
-  selectedNestedActionRecognitionIndex.value = null
-  isActionOnlyView.value = false
+  selectedFlowItemId.value = null
 }
 
 // 从流程图定位到日志分析
 const handleNavigateToNode = (task: TaskInfo, node: NodeInfo) => {
   selectedTask.value = task
   selectedNode.value = node
-  selectedRecognitionIndex.value = null
-  selectedNestedIndex.value = null
-  selectedActionIndex.value = null
-  selectedNestedActionIndex.value = null
-  selectedActionRecognitionIndex.value = null
-  selectedNestedActionRecognitionIndex.value = null
-  isActionOnlyView.value = false
+  selectedFlowItemId.value = null
   pendingScrollNodeId.value = node.node_id
   viewMode.value = 'analysis'
 }
@@ -1192,85 +1201,54 @@ const handleNavigateToNode = (task: TaskInfo, node: NodeInfo) => {
 // 选择节点
 const handleSelectNode = (node: NodeInfo) => {
   selectedNode.value = node
-  selectedRecognitionIndex.value = null
-  selectedNestedIndex.value = null
-  selectedActionIndex.value = null
-  selectedNestedActionIndex.value = null
-  selectedActionRecognitionIndex.value = null
-  selectedNestedActionRecognitionIndex.value = null
-  isActionOnlyView.value = false
+  selectedFlowItemId.value = null
 }
 
 // 选择动作
 const handleSelectAction = (node: NodeInfo) => {
   selectedNode.value = node
-  selectedRecognitionIndex.value = null
-  selectedNestedIndex.value = null
-  selectedActionIndex.value = null
-  selectedNestedActionIndex.value = null
-  selectedActionRecognitionIndex.value = null
-  selectedNestedActionRecognitionIndex.value = null
-  isActionOnlyView.value = true
+  selectedFlowItemId.value = pickMainActionFlowItemId(node)
 }
 
 // 选择 Action 内识别（例如 CCLevelMax）
 const handleSelectActionRecognition = (node: NodeInfo, attemptIndex: number) => {
   selectedNode.value = node
-  selectedRecognitionIndex.value = null
-  selectedNestedIndex.value = null
-  selectedActionIndex.value = null
-  selectedNestedActionIndex.value = null
-  selectedActionRecognitionIndex.value = attemptIndex
-  selectedNestedActionRecognitionIndex.value = null
-  isActionOnlyView.value = false
+  selectedFlowItemId.value = pickFlowId(node, `node.action.recognition.${attemptIndex}`)
 }
 
 // 选择识别尝试
 const handleSelectRecognition = (node: NodeInfo, attemptIndex: number) => {
   selectedNode.value = node
-  selectedRecognitionIndex.value = attemptIndex
-  selectedNestedIndex.value = null
-  selectedActionIndex.value = null
-  selectedNestedActionIndex.value = null
-  selectedActionRecognitionIndex.value = null
-  selectedNestedActionRecognitionIndex.value = null
-  isActionOnlyView.value = false
+  selectedFlowItemId.value = pickFlowId(node, `node.recognition.${attemptIndex}`)
 }
 
 // 选择嵌套节点
 const handleSelectNested = (node: NodeInfo, attemptIndex: number, nestedIndex: number) => {
   selectedNode.value = node
-  selectedRecognitionIndex.value = attemptIndex
-  selectedNestedIndex.value = nestedIndex
-  selectedActionIndex.value = null
-  selectedNestedActionIndex.value = null
-  selectedActionRecognitionIndex.value = null
-  selectedNestedActionRecognitionIndex.value = null
-  isActionOnlyView.value = false
+  selectedFlowItemId.value = pickFlowId(node, `node.recognition.${attemptIndex}.nested.${nestedIndex}`)
 }
 
 // 选择嵌套动作节点
 const handleSelectNestedAction = (node: NodeInfo, actionIndex: number, nestedIndex: number) => {
   selectedNode.value = node
-  selectedRecognitionIndex.value = null
-  selectedNestedIndex.value = null
-  selectedActionIndex.value = actionIndex
-  selectedNestedActionIndex.value = nestedIndex
-  selectedActionRecognitionIndex.value = null
-  selectedNestedActionRecognitionIndex.value = null
-  isActionOnlyView.value = false
+  const nestedAction = node.nested_action_nodes?.[actionIndex]?.nested_actions?.[nestedIndex]
+  if (!nestedAction) {
+    selectedFlowItemId.value = null
+    return
+  }
+  selectedFlowItemId.value = pickFlowId(node, `task.${actionIndex}.action.${nestedIndex}.${nestedAction.node_id}`)
 }
 
 // 选择嵌套动作中的识别尝试（例如 CCUpdate 下的某次识别）
 const handleSelectNestedActionRecognition = (node: NodeInfo, actionIndex: number, nestedIndex: number, attemptIndex: number) => {
   selectedNode.value = node
-  selectedRecognitionIndex.value = null
-  selectedNestedIndex.value = null
-  selectedActionIndex.value = actionIndex
-  selectedNestedActionIndex.value = nestedIndex
-  selectedActionRecognitionIndex.value = null
-  selectedNestedActionRecognitionIndex.value = attemptIndex
-  isActionOnlyView.value = false
+  selectedFlowItemId.value = pickFlowId(node, `task.${actionIndex}.action.${nestedIndex}.reco.${attemptIndex}`)
+}
+
+// 选择任意 flow item（用于深层嵌套识别）
+const handleSelectFlowItem = (node: NodeInfo, flowItemId: string) => {
+  selectedNode.value = node
+  selectedFlowItemId.value = pickFlowId(node, flowItemId)
 }
 
 // 过滤任务列表
@@ -1351,6 +1329,7 @@ watch(filteredTasks, (newTasks) => {
     } else {
       selectedTask.value = null
       selectedNode.value = null
+      selectedFlowItemId.value = null
     }
   }
 })
@@ -1377,13 +1356,7 @@ const modalWidthSmall = computed(() => isMobile.value ? '90vw' : '500px')
 watch(
   [
     selectedNode,
-    selectedRecognitionIndex,
-    selectedNestedIndex,
-    selectedActionIndex,
-    selectedNestedActionIndex,
-    selectedActionRecognitionIndex,
-    selectedNestedActionRecognitionIndex,
-    isActionOnlyView,
+    selectedFlowItemId,
   ],
   () => {
     if (isMobile.value && selectedNode.value) {
@@ -1625,6 +1598,7 @@ onBeforeUnmount(() => {
             @select-nested-action="handleSelectNestedAction"
             @select-action-recognition="handleSelectActionRecognition"
             @select-nested-action-recognition="handleSelectNestedActionRecognition"
+            @select-flow-item="handleSelectFlowItem"
             @file-loading-start="handleFileLoadingStart"
             @file-loading-end="handleFileLoadingEnd"
             @open-task-drawer="showTaskDrawer = true"
@@ -1688,13 +1662,7 @@ onBeforeUnmount(() => {
             <n-drawer-content title="详细信息">
               <detail-view
                 :selected-node="selectedNode"
-                :selected-recognition-index="selectedRecognitionIndex"
-                :selected-nested-index="selectedNestedIndex"
-                :selected-action-index="selectedActionIndex"
-                :selected-nested-action-index="selectedNestedActionIndex"
-                :selected-action-recognition-index="selectedActionRecognitionIndex"
-                :selected-nested-action-recognition-index="selectedNestedActionRecognitionIndex"
-                :is-action-only-view="isActionOnlyView"
+                :selected-flow-item-id="selectedFlowItemId"
                 style="height: 100%"
               />
             </n-drawer-content>
@@ -1729,6 +1697,7 @@ onBeforeUnmount(() => {
               @select-nested-action="handleSelectNestedAction"
               @select-action-recognition="handleSelectActionRecognition"
               @select-nested-action-recognition="handleSelectNestedActionRecognition"
+              @select-flow-item="handleSelectFlowItem"
               @file-loading-start="handleFileLoadingStart"
               @file-loading-end="handleFileLoadingEnd"
               @scroll-done="pendingScrollNodeId = null"
@@ -1754,13 +1723,7 @@ onBeforeUnmount(() => {
               </n-button>
               <detail-view
                 :selected-node="selectedNode"
-                :selected-recognition-index="selectedRecognitionIndex"
-                :selected-nested-index="selectedNestedIndex"
-                :selected-action-index="selectedActionIndex"
-                :selected-nested-action-index="selectedNestedActionIndex"
-                :selected-action-recognition-index="selectedActionRecognitionIndex"
-                :selected-nested-action-recognition-index="selectedNestedActionRecognitionIndex"
-                :is-action-only-view="isActionOnlyView"
+                :selected-flow-item-id="selectedFlowItemId"
                 style="height: 100%"
               />
             </n-card>
@@ -1842,6 +1805,7 @@ onBeforeUnmount(() => {
                   @select-nested-action="handleSelectNestedAction"
                   @select-action-recognition="handleSelectActionRecognition"
                   @select-nested-action-recognition="handleSelectNestedActionRecognition"
+                  @select-flow-item="handleSelectFlowItem"
                   @file-loading-start="handleFileLoadingStart"
                   @file-loading-end="handleFileLoadingEnd"
                   @open-task-drawer="showTaskDrawer = true"
@@ -1916,13 +1880,7 @@ onBeforeUnmount(() => {
             <n-drawer-content title="详细信息">
               <detail-view
                 :selected-node="selectedNode"
-                :selected-recognition-index="selectedRecognitionIndex"
-                :selected-nested-index="selectedNestedIndex"
-                :selected-action-index="selectedActionIndex"
-                :selected-nested-action-index="selectedNestedActionIndex"
-                :selected-action-recognition-index="selectedActionRecognitionIndex"
-                :selected-nested-action-recognition-index="selectedNestedActionRecognitionIndex"
-                :is-action-only-view="isActionOnlyView"
+                :selected-flow-item-id="selectedFlowItemId"
                 style="height: 100%"
               />
             </n-drawer-content>
@@ -1965,6 +1923,7 @@ onBeforeUnmount(() => {
                   @select-nested-action="handleSelectNestedAction"
                   @select-action-recognition="handleSelectActionRecognition"
                   @select-nested-action-recognition="handleSelectNestedActionRecognition"
+                  @select-flow-item="handleSelectFlowItem"
                   @file-loading-start="handleFileLoadingStart"
                   @file-loading-end="handleFileLoadingEnd"
                   @scroll-done="pendingScrollNodeId = null"
@@ -1990,14 +1949,7 @@ onBeforeUnmount(() => {
                   </n-button>
                   <detail-view
                     :selected-node="selectedNode"
-                    :selected-task="selectedTask"
-                    :selected-recognition-index="selectedRecognitionIndex"
-                    :selected-nested-index="selectedNestedIndex"
-                    :selected-action-index="selectedActionIndex"
-                    :selected-nested-action-index="selectedNestedActionIndex"
-                    :selected-action-recognition-index="selectedActionRecognitionIndex"
-                    :selected-nested-action-recognition-index="selectedNestedActionRecognitionIndex"
-                    :is-action-only-view="isActionOnlyView"
+                    :selected-flow-item-id="selectedFlowItemId"
                     style="height: 100%"
                   />
                 </n-card>

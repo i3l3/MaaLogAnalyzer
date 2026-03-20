@@ -120,6 +120,7 @@ const emit = defineEmits<{
   'select-nested-action': [node: NodeInfo, actionIndex: number, nestedIndex: number]
   'select-action-recognition': [node: NodeInfo, attemptIndex: number]
   'select-nested-action-recognition': [node: NodeInfo, actionIndex: number, nestedIndex: number, attemptIndex: number]
+  'select-flow-item': [node: NodeInfo, flowItemId: string]
   'file-loading-start': []
   'file-loading-end': []
   'open-task-drawer': []
@@ -824,6 +825,11 @@ const handleActionRecognitionClick = (node: NodeInfo, attemptIndex: number) => {
 const handleNestedActionRecognitionClick = (node: NodeInfo, actionIndex: number, nestedIndex: number, attemptIndex: number) => {
   emit('select-nested-action-recognition', node, actionIndex, nestedIndex, attemptIndex)
 }
+
+// 选择任意 flow item（支持深层嵌套识别）
+const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
+  emit('select-flow-item', node, flowItemId)
+}
 </script>
 
 <template>
@@ -1016,6 +1022,7 @@ const handleNestedActionRecognitionClick = (node: NodeInfo, actionIndex: number,
                   @select-nested-action="handleNestedActionClick"
                   @select-action-recognition="handleActionRecognitionClick"
                   @select-nested-action-recognition="handleNestedActionRecognitionClick"
+                  @select-flow-item="handleFlowItemClick"
                 />
               </div>
             </DynamicScrollerItem>
@@ -1294,6 +1301,7 @@ const handleNestedActionRecognitionClick = (node: NodeInfo, actionIndex: number,
                             @select-nested-action="handleNestedActionClick"
                             @select-action-recognition="handleActionRecognitionClick"
                             @select-nested-action-recognition="handleNestedActionRecognitionClick"
+                            @select-flow-item="handleFlowItemClick"
                           />
                         </div>
                       </DynamicScrollerItem>

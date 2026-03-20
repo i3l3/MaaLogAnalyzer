@@ -23,6 +23,7 @@ const emit = defineEmits<{
   'select-nested-action': [node: NodeInfo, actionIndex: number, nestedIndex: number]
   'select-action-recognition': [node: NodeInfo, attemptIndex: number]
   'select-nested-action-recognition': [node: NodeInfo, actionIndex: number, nestedIndex: number, attemptIndex: number]
+  'select-flow-item': [node: NodeInfo, flowItemId: string]
 }>()
 
 // 跟踪哪些识别尝试的嵌套节点是展开的
@@ -39,6 +40,15 @@ watch(() => props.node?.node_id, () => {
   expandedAttempts.value.clear()
   recognitionExpanded.value = !settings.defaultCollapseRecognition
   actionExpanded.value = !settings.defaultCollapseAction
+}, { flush: 'sync' })
+
+// 设置变化时同步默认折叠状态（无需切换节点）
+watch(() => settings.defaultCollapseRecognition, (val) => {
+  recognitionExpanded.value = !val
+}, { flush: 'sync' })
+
+watch(() => settings.defaultCollapseAction, (val) => {
+  actionExpanded.value = !val
 }, { flush: 'sync' })
 
 // 节点状态样式
@@ -182,8 +192,6 @@ const getButtonType = (status: string): ButtonType => {
 // 动作按钮类型
 const actionButtonType = computed<ButtonType>(() => {
   if (!props.node.action_details) return 'default'
-  // 如果嵌套动作组中有失败的，整体显示为失败
-  if (props.node.nested_action_nodes?.some(g => g.status === 'failed')) return 'error'
   return props.node.action_details.success ? 'success' : 'error'
 })
 
@@ -228,6 +236,7 @@ const actionButtonType = computed<ButtonType>(() => {
           @select-nested-action="(n, ai, ni) => emit('select-nested-action', n, ai, ni)"
           @select-action-recognition="(n, i) => emit('select-action-recognition', n, i)"
           @select-nested-action-recognition="(n, ai, ni, i) => emit('select-nested-action-recognition', n, ai, ni, i)"
+          @select-flow-item="(n, id) => emit('select-flow-item', n, id)"
           @toggle-recognition="recognitionExpanded = !recognitionExpanded"
           @toggle-action="actionExpanded = !actionExpanded"
           @toggle-nested="toggleNestedNodes"
@@ -250,6 +259,7 @@ const actionButtonType = computed<ButtonType>(() => {
           :merged-recognition-list="mergedRecognitionList"
           :recognition-expanded="recognitionExpanded"
           :action-expanded="actionExpanded"
+          :default-collapse-nested-action-nodes="settings.defaultCollapseNestedActionNodes"
           :is-expanded="isExpanded"
           @select-node="emit('select-node', $event)"
           @select-action="emit('select-action', $event)"
@@ -258,6 +268,7 @@ const actionButtonType = computed<ButtonType>(() => {
           @select-nested-action="(n, ai, ni) => emit('select-nested-action', n, ai, ni)"
           @select-action-recognition="(n, i) => emit('select-action-recognition', n, i)"
           @select-nested-action-recognition="(n, ai, ni, i) => emit('select-nested-action-recognition', n, ai, ni, i)"
+          @select-flow-item="(n, id) => emit('select-flow-item', n, id)"
           @toggle-recognition="recognitionExpanded = !recognitionExpanded"
           @toggle-action="actionExpanded = !actionExpanded"
           @toggle-nested="toggleNestedNodes"

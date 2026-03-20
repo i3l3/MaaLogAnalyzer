@@ -18,6 +18,7 @@ const emit = defineEmits<{
   'select-nested-action': [node: NodeInfo, actionIndex: number, nestedIndex: number]
   'select-action-recognition': [node: NodeInfo, attemptIndex: number]
   'select-nested-action-recognition': [node: NodeInfo, actionIndex: number, nestedIndex: number, attemptIndex: number]
+  'select-flow-item': [node: NodeInfo, flowItemId: string]
   'toggle-recognition': []
   'toggle-action': []
   'toggle-nested': [attemptIndex: number]
@@ -41,6 +42,35 @@ const dedupeRecognitionAttempts = (items: RecognitionAttempt[]) => {
     if (seen.has(key)) continue
     seen.add(key)
     result.push(item)
+  }
+  return result
+}
+
+interface FlattenedNestedRecognition {
+  attempt: RecognitionAttempt
+  flowItemId: string
+  depth: number
+}
+
+const flattenNestedRecognitionNodes = (
+  attempts: RecognitionAttempt[] | undefined,
+  parentFlowItemId: string,
+  depth = 1
+): FlattenedNestedRecognition[] => {
+  if (!attempts || attempts.length === 0) return []
+
+  const result: FlattenedNestedRecognition[] = []
+  for (let i = 0; i < attempts.length; i++) {
+    const attempt = attempts[i]
+    const flowItemId = `${parentFlowItemId}.nested.${i}`
+    result.push({
+      attempt,
+      flowItemId,
+      depth,
+    })
+    if (attempt.nested_nodes && attempt.nested_nodes.length > 0) {
+      result.push(...flattenNestedRecognitionNodes(attempt.nested_nodes, flowItemId, depth + 1))
+    }
   }
   return result
 }
@@ -77,76 +107,193 @@ const actionTree = computed(() => {
     actionLevelReco: dedupeRecognitionAttempts(props.node.nested_recognition_in_action ?? []),
   }
 })
+
+const hasRecognitionSection = computed(() => {
+  return props.mergedRecognitionList.length > 0 || actionTree.value.actionLevelReco.length > 0
+})
+
+const hasTaskSection = computed(() => {
+  return actionTree.value.actions.length > 0
+})
+
+const hasActionSection = computed(() => {
+  return !!props.node.action_details
+})
+
+const toTimestampMs = (timestamp?: string): number => {
+  if (!timestamp) return Number.POSITIVE_INFINITY
+  const normalized = timestamp.includes(' ') ? timestamp.replace(' ', 'T') : timestamp
+  const parsed = Date.parse(normalized)
+  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY
+}
+
+const pickEarliest = (timestamps: Array<string | undefined>): number => {
+  const values = timestamps.map(toTimestampMs).filter(value => Number.isFinite(value))
+  return values.length > 0 ? Math.min(...values) : Number.POSITIVE_INFINITY
+}
+
+const sectionOrder = computed<Array<'recognition' | 'task' | 'action'>>(() => {
+  const sections: Array<{ type: 'recognition' | 'task' | 'action'; ts: number }> = []
+
+  if (hasRecognitionSection.value) {
+    const recoTimestamps = [
+      ...props.node.recognition_attempts.map(attempt => attempt.timestamp),
+      ...actionTree.value.actionLevelReco.map(attempt => attempt.timestamp),
+    ]
+    sections.push({
+      type: 'recognition',
+      ts: pickEarliest(recoTimestamps),
+    })
+  }
+
+  if (hasTaskSection.value) {
+    const taskTimestamps = props.node.nested_action_nodes?.map(group => group.timestamp) ?? []
+    sections.push({
+      type: 'task',
+      ts: pickEarliest(taskTimestamps),
+    })
+  }
+
+  if (hasActionSection.value) {
+    const actionTs = pickEarliest([
+      props.node.action_details?.start_timestamp,
+      props.node.action_details?.end_timestamp,
+    ])
+    sections.push({
+      type: 'action',
+      ts: Number.isFinite(actionTs)
+        ? actionTs
+        : pickEarliest([props.node.end_timestamp, props.node.timestamp]),
+    })
+  }
+
+  return sections
+    .sort((a, b) => a.ts - b.ts)
+    .map(section => section.type)
+})
 </script>
 
 <template>
-  <!-- Recognition 部分 -->
-  <n-card v-if="mergedRecognitionList.length > 0" size="small">
-    <template #header>
-      <n-flex align="center" style="gap: 8px">
-        <span>Recognition</span>
-        <n-button size="small" @click="emit('toggle-recognition')">
-          {{ recognitionExpanded ? 'Hide' : 'Show' }}
-        </n-button>
-      </n-flex>
-    </template>
+  <template v-for="section in sectionOrder" :key="section">
+    <n-card v-if="section === 'recognition'" size="small">
+      <template #header>
+        <n-flex align="center" style="gap: 8px">
+          <span>Recognition</span>
+          <n-button size="small" @click="emit('toggle-recognition')">
+            {{ recognitionExpanded ? 'Hide' : 'Show' }}
+          </n-button>
+        </n-flex>
+      </template>
 
-    <n-flex vertical style="gap: 8px">
-      <template v-for="(item, idx) in mergedRecognitionList" :key="`merged-${idx}`">
-        <!-- 轮次分隔 -->
-        <n-text
-          v-if="item.isRoundSeparator && recognitionExpanded"
-          depth="3"
-          class="round-separator"
-        >
-          {{ item.name }}
-        </n-text>
-
-        <!-- 未识别的节点 -->
-        <n-button
-          v-else-if="recognitionExpanded && item.status === 'not-recognized'"
-          size="small"
-          type="default"
-          ghost
-          disabled
-          style="align-self: flex-start; opacity: 0.5"
-        >
-          {{ item.name }}
-        </n-button>
-
-        <!-- 已识别的节点（没有嵌套节点） -->
-        <n-flex v-else-if="!item.hasNestedNodes && (recognitionExpanded || item.status === 'success')" :key="`simple-${idx}`" vertical style="gap: 8px; align-items: flex-start">
-          <n-button
-            size="small"
-            :type="getButtonType(item.status)"
-            ghost
-            @click="emit('select-recognition', node, item.attemptIndex!)"
+      <n-flex vertical style="gap: 8px">
+        <template v-for="(item, idx) in mergedRecognitionList" :key="`merged-${idx}`">
+          <n-text
+            v-if="item.isRoundSeparator && recognitionExpanded"
+            depth="3"
+            class="round-separator"
           >
-            <template #icon>
-              <check-circle-outlined v-if="item.status === 'success'" />
-              <close-circle-outlined v-else />
-            </template>
+            {{ item.name }}
+          </n-text>
+
+          <n-button
+            v-else-if="recognitionExpanded && item.status === 'not-recognized'"
+            size="small"
+            type="default"
+            ghost
+            disabled
+            style="align-self: flex-start; opacity: 0.5"
+          >
             {{ item.name }}
           </n-button>
-          <n-image
-            v-if="item.attempt?.vision_image"
-            :src="convertFileSrc(item.attempt.vision_image)"
-            width="200"
-            style="border-radius: 4px"
-          />
-          <n-image
-            v-if="item.attempt?.error_image"
-            :src="convertFileSrc(item.attempt.error_image)"
-            width="200"
-            style="border-radius: 4px"
-          />
-        </n-flex>
 
-        <!-- 已识别的节点（有嵌套节点） -->
-        <template v-else-if="recognitionExpanded || item.status === 'success'">
-          <!-- 展开状态 -->
-          <n-card v-if="isExpanded(item.attemptIndex!)" :key="`nested-card-${item.attemptIndex}`" size="small">
-            <template #header>
+          <n-flex
+            v-else-if="!item.hasNestedNodes && (recognitionExpanded || item.status === 'success')"
+            :key="`simple-${idx}`"
+            vertical
+            style="gap: 8px; align-items: flex-start"
+          >
+            <n-button
+              size="small"
+              :type="getButtonType(item.status)"
+              ghost
+              @click="emit('select-recognition', node, item.attemptIndex!)"
+            >
+              <template #icon>
+                <check-circle-outlined v-if="item.status === 'success'" />
+                <close-circle-outlined v-else />
+              </template>
+              {{ item.name }}
+            </n-button>
+            <n-image
+              v-if="item.attempt?.vision_image"
+              :src="convertFileSrc(item.attempt.vision_image)"
+              width="200"
+              style="border-radius: 4px"
+            />
+            <n-image
+              v-if="item.attempt?.error_image"
+              :src="convertFileSrc(item.attempt.error_image)"
+              width="200"
+              style="border-radius: 4px"
+            />
+          </n-flex>
+
+          <template v-else-if="recognitionExpanded || item.status === 'success'">
+            <n-card v-if="isExpanded(item.attemptIndex!)" :key="`nested-card-${item.attemptIndex}`" size="small">
+              <template #header>
+                <n-flex align="center" style="gap: 8px">
+                  <n-button
+                    size="small"
+                    :type="getButtonType(item.status)"
+                    ghost
+                    @click="emit('select-recognition', node, item.attemptIndex!)"
+                  >
+                    <template #icon>
+                      <check-circle-outlined v-if="item.status === 'success'" />
+                      <close-circle-outlined v-else />
+                    </template>
+                    {{ item.name }}
+                  </n-button>
+                  <n-button size="small" @click="emit('toggle-nested', item.attemptIndex!)">
+                    Hide
+                  </n-button>
+                </n-flex>
+              </template>
+
+              <n-flex vertical style="gap: 12px">
+                <n-image
+                  v-if="item.attempt?.vision_image"
+                  :src="convertFileSrc(item.attempt.vision_image)"
+                  width="200"
+                  style="border-radius: 4px"
+                />
+                <n-image
+                  v-if="item.attempt?.error_image"
+                  :src="convertFileSrc(item.attempt.error_image)"
+                  width="200"
+                  style="border-radius: 4px"
+                />
+                <n-flex wrap style="gap: 8px 12px">
+                  <n-button
+                    v-for="nested in flattenNestedRecognitionNodes(item.attempt!.nested_nodes, `node.recognition.${item.attemptIndex!}`)"
+                    :key="`nested-${item.attemptIndex}-${nested.flowItemId}`"
+                    size="small"
+                    :type="nested.attempt.status === 'success' ? 'success' : 'warning'"
+                    ghost
+                    :style="{ marginLeft: `${(nested.depth - 1) * 12}px` }"
+                    @click="emit('select-flow-item', node, nested.flowItemId)"
+                  >
+                    <template #icon>
+                      <check-circle-outlined v-if="nested.attempt.status === 'success'" />
+                      <close-circle-outlined v-else />
+                    </template>
+                    {{ nested.attempt.name }}
+                  </n-button>
+                </n-flex>
+              </n-flex>
+            </n-card>
+
+            <n-flex v-else :key="`collapsed-${idx}`" vertical style="gap: 8px; align-items: flex-start">
               <n-flex align="center" style="gap: 8px">
                 <n-button
                   size="small"
@@ -161,12 +308,9 @@ const actionTree = computed(() => {
                   {{ item.name }}
                 </n-button>
                 <n-button size="small" @click="emit('toggle-nested', item.attemptIndex!)">
-                  Hide
+                  Show
                 </n-button>
               </n-flex>
-            </template>
-
-            <n-flex vertical style="gap: 12px">
               <n-image
                 v-if="item.attempt?.vision_image"
                 :src="convertFileSrc(item.attempt.vision_image)"
@@ -179,195 +323,130 @@ const actionTree = computed(() => {
                 width="200"
                 style="border-radius: 4px"
               />
-              <n-flex wrap style="gap: 8px 12px">
-                <n-button
-                  v-for="(nested, nestedIdx) in item.attempt!.nested_nodes"
-                  :key="`nested-${item.attemptIndex}-${nestedIdx}`"
-                  size="small"
-                  :type="nested.status === 'success' ? 'success' : 'warning'"
-                  ghost
-                  @click="emit('select-nested', node, item.attemptIndex!, nestedIdx)"
-                >
-                  <template #icon>
-                    <check-circle-outlined v-if="nested.status === 'success'" />
-                    <close-circle-outlined v-else />
-                  </template>
-                  {{ nested.name }}
-                </n-button>
-              </n-flex>
             </n-flex>
-          </n-card>
-
-          <!-- 折叠状态 -->
-          <n-flex v-else :key="`collapsed-${idx}`" vertical style="gap: 8px; align-items: flex-start">
-            <n-flex align="center" style="gap: 8px">
-              <n-button
-                size="small"
-                :type="getButtonType(item.status)"
-                ghost
-                @click="emit('select-recognition', node, item.attemptIndex!)"
-              >
-                <template #icon>
-                  <check-circle-outlined v-if="item.status === 'success'" />
-                  <close-circle-outlined v-else />
-                </template>
-                {{ item.name }}
-              </n-button>
-              <n-button size="small" @click="emit('toggle-nested', item.attemptIndex!)">
-                Show
-              </n-button>
-            </n-flex>
-            <n-image
-              v-if="item.attempt?.vision_image"
-              :src="convertFileSrc(item.attempt.vision_image)"
-              width="200"
-              style="border-radius: 4px"
-            />
-            <n-image
-              v-if="item.attempt?.error_image"
-              :src="convertFileSrc(item.attempt.error_image)"
-              width="200"
-              style="border-radius: 4px"
-            />
-          </n-flex>
-        </template>
-      </template>
-    </n-flex>
-  </n-card>
-
-  <!-- Action 部分 -->
-  <n-card
-    v-if="
-      node.action_details ||
-      actionTree.actions.length > 0 ||
-      actionTree.actionLevelReco.length > 0
-    "
-    size="small"
-    title="Action"
-  >
-    <n-flex vertical style="gap: 8px">
-      <n-flex align="center" style="gap: 8px">
-        <n-button
-          v-if="node.action_details"
-          size="small"
-          :type="actionButtonType"
-          ghost
-          @click="emit('select-action', node)"
-          style="align-self: flex-start"
-        >
-          <template #icon>
-            <check-circle-outlined v-if="actionButtonType === 'success'" />
-            <close-circle-outlined v-else />
           </template>
-          {{ node.action_details.name }}
-        </n-button>
-        <n-tag v-else size="small" type="default">No main action detail</n-tag>
-        <n-button
-          v-if="actionTree.actions.length > 0 || actionTree.actionLevelReco.length > 0"
+        </template>
+
+        <n-card
+          v-if="recognitionExpanded && actionTree.actionLevelReco.length > 0"
           size="small"
-          @click="emit('toggle-action')"
+          title="Action 内 Recognition"
         >
-          {{ actionExpanded ? 'Hide' : 'Show' }}
-        </n-button>
+          <n-flex wrap style="gap: 8px">
+            <n-button
+              v-for="(attempt, attemptIdx) in actionTree.actionLevelReco"
+              :key="`action-level-reco-${attemptIdx}`"
+              size="small"
+              :type="attempt.status === 'success' ? 'success' : 'warning'"
+              ghost
+              @click="emit('select-action-recognition', node, attemptIdx)"
+            >
+              <template #icon>
+                <check-circle-outlined v-if="attempt.status === 'success'" />
+                <close-circle-outlined v-else />
+              </template>
+              {{ attempt.name }}
+            </n-button>
+          </n-flex>
+        </n-card>
       </n-flex>
+    </n-card>
 
-      <template
-        v-if="actionExpanded && (actionTree.actions.length > 0 || actionTree.actionLevelReco.length > 0)"
-      >
-        <n-flex vertical style="gap: 12px">
-          <n-card
-            v-if="actionTree.actionLevelReco.length > 0"
-            size="small"
-            title="Action 内识别"
-          >
-            <n-flex wrap style="gap: 8px">
-              <n-button
-                v-for="(attempt, attemptIdx) in actionTree.actionLevelReco"
-                :key="`action-level-reco-${attemptIdx}`"
-                size="small"
-                :type="attempt.status === 'success' ? 'success' : 'warning'"
-                ghost
-                @click="emit('select-action-recognition', node, attemptIdx)"
-              >
-                <template #icon>
-                  <check-circle-outlined v-if="attempt.status === 'success'" />
-                  <close-circle-outlined v-else />
-                </template>
-                {{ attempt.name }}
-              </n-button>
-            </n-flex>
-          </n-card>
-
-          <n-card
-            v-for="(item, idx) in actionTree.actions"
-            :key="`nested-action-${idx}`"
-            size="small"
-          >
-            <template #header>
-              <n-flex justify="space-between" align="center">
-                <n-button
-                  size="small"
-                  @click="emit('select-nested-action', node, item.groupIdx, item.nestedIdx)"
-                >
-                  {{ item.nested.name }}{{ item.recognitionItems.length ? ` (${item.recognitionItems.length})` : '' }}
-                </n-button>
-                <n-tag size="small" :type="item.nested.status === 'success' ? 'success' : 'error'">
-                  {{ item.nested.status === 'success' ? '成功' : '失败' }}
-                </n-tag>
-              </n-flex>
-            </template>
-
-            <n-flex vertical style="gap: 8px">
-              <n-card v-if="item.recognitionItems.length > 0" size="small" title="Recognition">
-                <n-flex wrap style="gap: 8px">
-                  <n-button
-                    v-for="(attempt, attemptIdx) in item.recognitionItems"
-                    :key="`nested-reco-${idx}-${attemptIdx}`"
-                    size="small"
-                    :type="attempt.status === 'success' ? 'success' : 'warning'"
-                    ghost
-                    @click="emit('select-nested-action-recognition', node, item.groupIdx, item.nestedIdx, attemptIdx)"
-                  >
-                    <template #icon>
-                      <check-circle-outlined v-if="attempt.status === 'success'" />
-                      <close-circle-outlined v-else />
-                    </template>
-                    {{ attempt.name }}
-                  </n-button>
-                </n-flex>
-              </n-card>
-
-              <n-card size="small" title="Action">
-                <n-button
-                  v-if="item.nested.action_details"
-                  size="small"
-                  :type="item.nested.action_details.success ? 'success' : 'error'"
-                  ghost
-                  @click="emit('select-nested-action', node, item.groupIdx, item.nestedIdx)"
-                >
-                  <template #icon>
-                    <check-circle-outlined v-if="item.nested.action_details.success" />
-                    <close-circle-outlined v-else />
-                  </template>
-                  {{ item.nested.action_details.name }}
-                </n-button>
-                <n-flex v-else align="center" style="gap: 8px">
-                  <n-tag size="small" type="default">No action detail</n-tag>
-                  <n-button
-                    size="tiny"
-                    ghost
-                    @click="emit('select-nested-action', node, item.groupIdx, item.nestedIdx)"
-                  >
-                    查看节点
-                  </n-button>
-                </n-flex>
-              </n-card>
-            </n-flex>
-          </n-card>
+    <n-card v-else-if="section === 'task'" size="small">
+      <template #header>
+        <n-flex align="center" style="gap: 8px">
+          <span>Task</span>
+          <n-button size="small" @click="emit('toggle-action')">
+            {{ actionExpanded ? 'Hide' : 'Show' }}
+          </n-button>
         </n-flex>
       </template>
-    </n-flex>
-  </n-card>
+
+      <n-flex v-if="actionExpanded" vertical style="gap: 12px">
+        <n-card
+          v-for="(item, idx) in actionTree.actions"
+          :key="`nested-action-${idx}`"
+          size="small"
+        >
+          <template #header>
+            <n-flex justify="space-between" align="center">
+              <n-button
+                size="small"
+                @click="emit('select-nested-action', node, item.groupIdx, item.nestedIdx)"
+              >
+                {{ item.nested.name }}
+              </n-button>
+              <n-tag size="small" :type="item.nested.status === 'success' ? 'success' : 'error'">
+                {{ item.nested.status === 'success' ? '成功' : '失败' }}
+              </n-tag>
+            </n-flex>
+          </template>
+
+          <n-flex vertical style="gap: 8px">
+            <n-card v-if="item.recognitionItems.length > 0" size="small" title="Recognition">
+              <n-flex wrap style="gap: 8px">
+                <n-button
+                  v-for="(attempt, attemptIdx) in item.recognitionItems"
+                  :key="`nested-reco-${idx}-${attemptIdx}`"
+                  size="small"
+                  :type="attempt.status === 'success' ? 'success' : 'warning'"
+                  ghost
+                  @click="emit('select-nested-action-recognition', node, item.groupIdx, item.nestedIdx, attemptIdx)"
+                >
+                  <template #icon>
+                    <check-circle-outlined v-if="attempt.status === 'success'" />
+                    <close-circle-outlined v-else />
+                  </template>
+                  {{ attempt.name }}
+                </n-button>
+              </n-flex>
+            </n-card>
+
+            <n-card size="small" title="Action">
+              <n-button
+                v-if="item.nested.action_details"
+                size="small"
+                :type="item.nested.action_details.success ? 'success' : 'error'"
+                ghost
+                @click="emit('select-nested-action', node, item.groupIdx, item.nestedIdx)"
+              >
+                <template #icon>
+                  <check-circle-outlined v-if="item.nested.action_details.success" />
+                  <close-circle-outlined v-else />
+                </template>
+                {{ item.nested.action_details.name }}
+              </n-button>
+              <n-flex v-else align="center" style="gap: 8px">
+                <n-tag size="small" type="default">No action detail</n-tag>
+                <n-button
+                  size="tiny"
+                  ghost
+                  @click="emit('select-nested-action', node, item.groupIdx, item.nestedIdx)"
+                >
+                  查看节点
+                </n-button>
+              </n-flex>
+            </n-card>
+          </n-flex>
+        </n-card>
+      </n-flex>
+    </n-card>
+
+    <n-card v-else-if="section === 'action'" size="small" title="Action">
+      <n-button
+        size="small"
+        :type="actionButtonType"
+        ghost
+        @click="emit('select-action', node)"
+      >
+        <template #icon>
+          <check-circle-outlined v-if="actionButtonType === 'success'" />
+          <close-circle-outlined v-else />
+        </template>
+        {{ node.action_details!.name }}
+      </n-button>
+    </n-card>
+  </template>
 </template>
 
 <style scoped>

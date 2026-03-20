@@ -1,6 +1,7 @@
 import { markRaw } from 'vue'
 import type { EventNotification, TaskInfo, NodeInfo, RecognitionAttempt } from '../types'
 import { StringPool } from './stringPool'
+import { buildNodeFlowItems } from './nodeFlow'
 
 export interface ParseProgress {
   current: number
@@ -83,6 +84,15 @@ class SubTaskCollector {
       result.push(...recognitions)
     }
     this.recognitionNodes.clear()
+    return result
+  }
+
+  consumeOrphanRecognitions(): RecognitionAttempt[] {
+    const result: RecognitionAttempt[] = []
+    for (const recognitions of this.recognitions.values()) {
+      result.push(...recognitions)
+    }
+    this.recognitions.clear()
     return result
   }
 
@@ -359,18 +369,23 @@ export class LogParser {
 
     // 当前节点的累积状态
     let currentNextList: any[] = []
-    const recognitionAttempts: RecognitionAttempt[] = []
+    const currentTaskRecognitions: RecognitionAttempt[] = []
     const actionLevelRecognitionNodes: RecognitionAttempt[] = []
     const nestedActionNodes: any[] = []
     const pipelineNodeStartTimes = new Map<number, string>()
     const actionStartTimes = new Map<number, string>()
     const actionEndTimes = new Map<number, string>()
+    const actionStartOrders = new Map<number, number>()
+    const actionEndOrders = new Map<number, number>()
     const subTaskPipelineNodeStartTimes = new Map<string, string>()
     const subTaskActionStartTimes = new Map<string, string>()
     const subTaskActionEndTimes = new Map<string, string>()
+    const subTaskActionStartOrders = new Map<string, number>()
+    const subTaskActionEndOrders = new Map<string, number>()
     const activeRecognitionAttempts = new Map<string, RecognitionAttempt>()
     const activeRecognitionStack: Array<{ taskId: number; recoId: number }> = []
     const finishedRecognitionKeys = new Set<string>()
+    const recognitionOrderMeta = new WeakMap<RecognitionAttempt, { startSeq: number; endSeq: number }>()
 
     const scopedKey = (taskId: number, id: number): string => `${taskId}:${id}`
     const withActionTimestamps = (
@@ -401,28 +416,36 @@ export class LogParser {
       const recoId = typeof value === 'number' ? value : Number(value)
       return Number.isFinite(recoId) ? recoId : null
     }
-    const startRecognitionAttempt = (taskId: number, details: Record<string, any>, timestamp: string) => {
+    const startRecognitionAttempt = (
+      taskId: number,
+      details: Record<string, any>,
+      timestamp: string,
+      eventOrder: number
+    ) => {
       const recoId = normalizeRecoId(details.reco_id)
       if (recoId == null) return
       const key = scopedKey(taskId, recoId)
       if (finishedRecognitionKeys.has(key) || activeRecognitionAttempts.has(key)) return
 
       const startTimestamp = this.stringPool.intern(timestamp)
-      activeRecognitionAttempts.set(key, {
+      const attempt: RecognitionAttempt = {
         reco_id: recoId,
         name: this.stringPool.intern(details.name || ''),
         timestamp: startTimestamp,
         start_timestamp: startTimestamp,
         end_timestamp: startTimestamp,
         status: 'failed',
-      })
+      }
+      recognitionOrderMeta.set(attempt, { startSeq: eventOrder, endSeq: eventOrder })
+      activeRecognitionAttempts.set(key, attempt)
       activeRecognitionStack.push({ taskId, recoId })
     }
     const finishRecognitionAttempt = (
       taskId: number,
       details: Record<string, any>,
       timestamp: string,
-      status: 'success' | 'failed'
+      status: 'success' | 'failed',
+      eventOrder: number
     ): RecognitionAttempt | undefined => {
       const recoId = normalizeRecoId(details.reco_id)
       if (recoId == null) return undefined
@@ -451,6 +474,12 @@ export class LogParser {
       attempt.error_image = this.findRecognitionImage(timestamp, details.name || '')
       attempt.vision_image = this.findVisionImage(timestamp, details.name || '', recoId)
 
+      const existingMeta = recognitionOrderMeta.get(attempt)
+      recognitionOrderMeta.set(attempt, {
+        startSeq: existingMeta?.startSeq ?? eventOrder,
+        endSeq: eventOrder
+      })
+
       activeRecognitionAttempts.delete(key)
       removeFromActiveRecognitionStack(taskId, recoId)
       finishedRecognitionKeys.add(key)
@@ -467,33 +496,41 @@ export class LogParser {
       }
       return result
     }
-    const parseTimestampMs = (value?: string): number => {
-      if (!value) return Number.NaN
-      const normalized = value.includes('T') ? value : value.replace(' ', 'T')
-      const parsed = Date.parse(normalized)
-      return Number.isFinite(parsed) ? parsed : Number.NaN
+    const hasRecognitionByRecoId = (items: RecognitionAttempt[], recoId: number): boolean => {
+      return items.some(item => item.reco_id === recoId)
     }
-    const sortByTimestampThenRecoId = (items: RecognitionAttempt[]) => {
+    const isKnownRecognitionRecoId = (recoId: number): boolean => {
+      return hasRecognitionByRecoId(currentTaskRecognitions, recoId) || hasRecognitionByRecoId(actionLevelRecognitionNodes, recoId)
+    }
+    const pushActionLevelRecognition = (attempt: RecognitionAttempt) => {
+      if (isKnownRecognitionRecoId(attempt.reco_id)) return
+      actionLevelRecognitionNodes.push(attempt)
+    }
+    const sortByParseOrderThenRecoId = (items: RecognitionAttempt[]) => {
       return [...items].sort((a, b) => {
-        const at = parseTimestampMs(a.end_timestamp || a.timestamp)
-        const bt = parseTimestampMs(b.end_timestamp || b.timestamp)
-        if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) return at - bt
+        const am = recognitionOrderMeta.get(a)
+        const bm = recognitionOrderMeta.get(b)
+        const aEnd = am?.endSeq ?? Number.POSITIVE_INFINITY
+        const bEnd = bm?.endSeq ?? Number.POSITIVE_INFINITY
+        if (aEnd !== bEnd) return aEnd - bEnd
+        const aStart = am?.startSeq ?? Number.POSITIVE_INFINITY
+        const bStart = bm?.startSeq ?? Number.POSITIVE_INFINITY
+        if (aStart !== bStart) return aStart - bStart
         return a.reco_id - b.reco_id
       })
     }
-    const ATTACH_JITTER_MS = 10
-    const ATTACH_POST_END_WINDOW_MS = 120
     const pickBestAttemptIndex = (attempts: RecognitionAttempt[], node: RecognitionAttempt): number => {
-      const nodeMs = parseTimestampMs(node.timestamp || node.start_timestamp || node.end_timestamp)
-      if (!Number.isFinite(nodeMs)) {
+      const nodeMeta = recognitionOrderMeta.get(node)
+      if (!nodeMeta) {
         return attempts.length === 1 ? 0 : -1
       }
+      const nodeStartSeq = nodeMeta.startSeq
 
       type Candidate = {
         idx: number
         bucket: number
-        startMs: number
-        endMs: number
+        startSeq: number
+        endSeq: number
         distance: number
       }
 
@@ -501,33 +538,29 @@ export class LogParser {
 
       for (let i = 0; i < attempts.length; i++) {
         const attempt = attempts[i]
-        const startMs = parseTimestampMs(attempt.start_timestamp || attempt.timestamp)
-        const endMsRaw = parseTimestampMs(attempt.end_timestamp || attempt.timestamp)
-        if (!Number.isFinite(startMs) || !Number.isFinite(endMsRaw)) continue
-        const endMs = Math.max(startMs, endMsRaw)
+        const meta = recognitionOrderMeta.get(attempt)
+        if (!meta) continue
+        const startSeq = meta.startSeq
+        const endSeq = Math.max(meta.startSeq, meta.endSeq)
 
         let bucket = Number.POSITIVE_INFINITY
         let distance = Number.POSITIVE_INFINITY
 
-        // bucket 0: 严格落在识别尝试区间内
-        if (nodeMs >= startMs && nodeMs <= endMs) {
+        // bucket 0: 节点顺序落在识别尝试区间内
+        if (nodeStartSeq >= startSeq && nodeStartSeq <= endSeq) {
           bucket = 0
           distance = 0
         }
-        // bucket 1: 落在轻微抖动区间内
-        else if (nodeMs >= startMs - ATTACH_JITTER_MS && nodeMs <= endMs + ATTACH_JITTER_MS) {
+        // bucket 1: 节点出现在识别尝试之后，优先挂到最近结束的尝试
+        else if (nodeStartSeq >= endSeq) {
           bucket = 1
-          distance = Math.min(Math.abs(nodeMs - startMs), Math.abs(nodeMs - endMs))
+          distance = nodeStartSeq - endSeq
         }
-        // bucket 2: 仅允许结束后的短时间延迟（事件上报乱序）
-        else if (nodeMs > endMs && nodeMs - endMs <= ATTACH_POST_END_WINDOW_MS) {
-          bucket = 2
-          distance = nodeMs - endMs
-        } else {
+        else {
           continue
         }
 
-        const current: Candidate = { idx: i, bucket, startMs, endMs, distance }
+        const current: Candidate = { idx: i, bucket, startSeq, endSeq, distance }
         if (!best) {
           best = current
           continue
@@ -540,11 +573,11 @@ export class LogParser {
         if (current.bucket > best.bucket) continue
 
         // 同一 bucket 下优先归属到更晚开始的尝试，避免挂到上一轮节点
-        if (current.startMs > best.startMs) {
+        if (current.startSeq > best.startSeq) {
           best = current
           continue
         }
-        if (current.startMs < best.startMs) continue
+        if (current.startSeq < best.startSeq) continue
 
         if (current.distance < best.distance) {
           best = current
@@ -552,7 +585,7 @@ export class LogParser {
         }
         if (current.distance > best.distance) continue
 
-        if (current.endMs > best.endMs) {
+        if (current.endSeq > best.endSeq) {
           best = current
         }
       }
@@ -570,18 +603,22 @@ export class LogParser {
         }
       }
 
-      const mergedAttempts = attempts.map((attempt) => ({
-        ...attempt,
-        nested_nodes: attempt.nested_nodes ? [...attempt.nested_nodes] : undefined
-      }))
-      const sortedNodes = sortByTimestampThenRecoId(recognitionNodes)
+      const mergedAttempts = attempts.map((attempt) => {
+        const cloned: RecognitionAttempt = {
+          ...attempt,
+          nested_nodes: attempt.nested_nodes ? [...attempt.nested_nodes] : undefined
+        }
+        const meta = recognitionOrderMeta.get(attempt)
+        if (meta) {
+          recognitionOrderMeta.set(cloned, { ...meta })
+        }
+        return cloned
+      })
+      const sortedNodes = sortByParseOrderThenRecoId(recognitionNodes)
       const orphans: RecognitionAttempt[] = []
 
       for (const node of sortedNodes) {
         let targetIdx = pickBestAttemptIndex(mergedAttempts, node)
-        if (targetIdx < 0 && mergedAttempts.length === 1) {
-          targetIdx = 0
-        }
 
         if (targetIdx < 0) {
           orphans.push(node)
@@ -601,10 +638,17 @@ export class LogParser {
         orphans
       }
     }
-    const cloneRecognitionAttempt = (attempt: RecognitionAttempt): RecognitionAttempt => ({
-      ...attempt,
-      nested_nodes: attempt.nested_nodes ? dedupeRecognitionAttempts([...attempt.nested_nodes]) : undefined
-    })
+    const cloneRecognitionAttempt = (attempt: RecognitionAttempt): RecognitionAttempt => {
+      const cloned: RecognitionAttempt = {
+        ...attempt,
+        nested_nodes: attempt.nested_nodes ? dedupeRecognitionAttempts([...attempt.nested_nodes]) : undefined
+      }
+      const meta = recognitionOrderMeta.get(attempt)
+      if (meta) {
+        recognitionOrderMeta.set(cloned, { ...meta })
+      }
+      return cloned
+    }
     const attachNodeToAttempt = (attempt: RecognitionAttempt, node: RecognitionAttempt) => {
       const mergedNested = dedupeRecognitionAttempts([
         ...(attempt.nested_nodes ?? []),
@@ -624,7 +668,8 @@ export class LogParser {
     const attachActionLevelRecognitionAcrossScopes = (
       topLevelAttempts: RecognitionAttempt[],
       nestedActionGroups: any[],
-      actionLevelNodes: RecognitionAttempt[]
+      actionLevelNodes: RecognitionAttempt[],
+      actionStartOrder?: number
     ) => {
       const mergedTopLevelAttempts = topLevelAttempts.map(cloneRecognitionAttempt)
       const mergedNestedGroups = nestedActionGroups.map((group: any) => ({
@@ -635,7 +680,7 @@ export class LogParser {
         }))
       }))
       const remaining: RecognitionAttempt[] = []
-      const orderedNodes = sortByTimestampThenRecoId(actionLevelNodes)
+      const orderedNodes = sortByParseOrderThenRecoId(actionLevelNodes)
 
       for (const node of orderedNodes) {
         let attached = false
@@ -656,7 +701,13 @@ export class LogParser {
         if (attached) continue
 
         // 2) 再挂到顶层识别尝试（如 CCBuyCard 的 custom rec）
-        if (mergedTopLevelAttempts.length > 0) {
+        // 仅允许挂载 action 开始前产生的节点，action 期内节点应保持在 action 作用域
+        const nodeMeta = recognitionOrderMeta.get(node)
+        const canAttachToTopLevel = mergedTopLevelAttempts.length > 0 && (
+          actionStartOrder == null ||
+          (nodeMeta != null && nodeMeta.startSeq < actionStartOrder)
+        )
+        if (canAttachToTopLevel) {
           const idx = pickBestAttemptIndex(mergedTopLevelAttempts, node)
           if (idx >= 0) {
             attachNodeToAttempt(mergedTopLevelAttempts[idx], node)
@@ -679,7 +730,9 @@ export class LogParser {
     // 子任务事件收集器
     const subTasks = new SubTaskCollector()
 
-    for (const event of taskEvents) {
+    for (let eventIndex = 0; eventIndex < taskEvents.length; eventIndex++) {
+      const event = taskEvents[eventIndex]
+      const eventOrder = eventIndex
       const { message, details } = event
       const isCurrentTask = details.task_id === task.task_id
 
@@ -697,7 +750,7 @@ export class LogParser {
             break
 
           case 'Node.Recognition.Starting':
-            startRecognitionAttempt(task.task_id, details, event.timestamp)
+            startRecognitionAttempt(task.task_id, details, event.timestamp, eventOrder)
             break
 
           case 'Node.Recognition.Succeeded':
@@ -706,10 +759,61 @@ export class LogParser {
               task.task_id,
               details,
               event.timestamp,
-              message === 'Node.Recognition.Succeeded' ? 'success' : 'failed'
+              message === 'Node.Recognition.Succeeded' ? 'success' : 'failed',
+              eventOrder
             )
             if (attempt) {
-              recognitionAttempts.push(attempt)
+              currentTaskRecognitions.push(attempt)
+            }
+            break
+          }
+
+          case 'Node.RecognitionNode.Succeeded':
+          case 'Node.RecognitionNode.Failed': {
+            // 当前 task 的 RecognitionNode 也可能承载 action 期内识别，不能直接忽略。
+            const parentRecognition = findActiveParentRecognition()
+            const normalizedPendingRecognitions = dedupeRecognitionAttempts(
+              subTasks.consumeRecognitions(task.task_id)
+            )
+            if (normalizedPendingRecognitions.length > 0) {
+              for (const recognition of normalizedPendingRecognitions) {
+                if (parentRecognition && parentRecognition.reco_id !== recognition.reco_id) {
+                  attachNodeToAttempt(parentRecognition, recognition)
+                  continue
+                }
+                if (!isKnownRecognitionRecoId(recognition.reco_id)) {
+                  pushActionLevelRecognition(recognition)
+                }
+              }
+              break
+            }
+
+            const recoId = normalizeRecoId(
+              details.reco_details?.reco_id ?? details.reco_id ?? details.node_id
+            )
+            if (recoId == null) {
+              break
+            }
+
+            const timestamp = this.stringPool.intern(event.timestamp)
+            const recoNodeAttempt: RecognitionAttempt = {
+              reco_id: recoId,
+              name: this.stringPool.intern(details.name || ''),
+              timestamp,
+              start_timestamp: timestamp,
+              end_timestamp: timestamp,
+              status: message === 'Node.RecognitionNode.Succeeded' ? 'success' : 'failed',
+              reco_details: details.reco_details ? markRaw(details.reco_details) : undefined,
+              error_image: this.findRecognitionImage(event.timestamp, details.name || ''),
+              vision_image: this.findVisionImage(event.timestamp, details.name || '', recoId)
+            }
+            recognitionOrderMeta.set(recoNodeAttempt, { startSeq: eventOrder, endSeq: eventOrder })
+            if (parentRecognition && parentRecognition.reco_id !== recoId) {
+              attachNodeToAttempt(parentRecognition, recoNodeAttempt)
+              break
+            }
+            if (!isKnownRecognitionRecoId(recoId)) {
+              pushActionLevelRecognition(recoNodeAttempt)
             }
             break
           }
@@ -717,6 +821,7 @@ export class LogParser {
           case 'Node.Action.Starting':
             if (details.action_id != null) {
               actionStartTimes.set(details.action_id, this.stringPool.intern(event.timestamp))
+              actionStartOrders.set(details.action_id, eventOrder)
             }
             break
 
@@ -724,6 +829,7 @@ export class LogParser {
           case 'Node.Action.Failed':
             if (details.action_id != null) {
               actionEndTimes.set(details.action_id, this.stringPool.intern(event.timestamp))
+              actionEndOrders.set(details.action_id, eventOrder)
             }
             break
 
@@ -738,16 +844,38 @@ export class LogParser {
             const actionId = details.action_details?.action_id ?? details.node_details?.action_id
             const actionStartTimestamp = actionId != null ? actionStartTimes.get(actionId) : undefined
             const actionEndTimestamp = actionId != null ? actionEndTimes.get(actionId) : undefined
+            const actionStartOrder = actionId != null ? actionStartOrders.get(actionId) : undefined
+            const actionEndOrder = actionId != null ? actionEndOrders.get(actionId) : undefined
+            const currentTaskRecognitionAttempts = dedupeRecognitionAttempts(currentTaskRecognitions)
+            const scopedTopLevelRecognitions: RecognitionAttempt[] = []
+            const scopedActionRecognitions: RecognitionAttempt[] = []
+            for (const attempt of currentTaskRecognitionAttempts) {
+              const attemptMeta = recognitionOrderMeta.get(attempt)
+              if (
+                actionStartOrder != null &&
+                attemptMeta &&
+                attemptMeta.endSeq >= actionStartOrder &&
+                (actionEndOrder == null || attemptMeta.startSeq <= actionEndOrder)
+              ) {
+                scopedActionRecognitions.push(attempt)
+              } else {
+                scopedTopLevelRecognitions.push(attempt)
+              }
+            }
             const subTaskActionGroups = subTasks.consumeAsNestedActionGroups(this.stringPool)
-            const subTaskOrphanRecognitions = subTasks.consumeOrphanRecognitionNodes()
+            const subTaskOrphanRecognitionAttempts = subTasks.consumeOrphanRecognitions()
+            const subTaskOrphanRecognitionNodes = subTasks.consumeOrphanRecognitionNodes()
             const pendingActionLevelRecognitions = dedupeRecognitionAttempts([
               ...actionLevelRecognitionNodes,
-              ...subTaskOrphanRecognitions
+              ...scopedActionRecognitions,
+              ...subTaskOrphanRecognitionAttempts,
+              ...subTaskOrphanRecognitionNodes
             ])
             const scopedAttachResult = attachActionLevelRecognitionAcrossScopes(
-              recognitionAttempts,
+              scopedTopLevelRecognitions,
               subTaskActionGroups,
-              pendingActionLevelRecognitions
+              pendingActionLevelRecognitions,
+              actionStartOrder
             )
             const nestedRecognitionInAction = scopedAttachResult.remaining
             const fallbackRecoDetails =
@@ -783,12 +911,15 @@ export class LogParser {
               error_image: this.findErrorImage(event.timestamp, nodeName),
               wait_freezes_images: this.findWaitFreezesImages(event.timestamp, details.action_details?.name || details.node_details?.name || nodeName)
             }
+            node.flow_items = buildNodeFlowItems(node)
             nodes.push(node)
             nodeIdSet.add(nodeId)
             pipelineNodeStartTimes.delete(nodeId)
             if (actionId != null) {
               actionStartTimes.delete(actionId)
               actionEndTimes.delete(actionId)
+              actionStartOrders.delete(actionId)
+              actionEndOrders.delete(actionId)
             }
 
             // 如果嵌套动作组中有失败的，节点整体标记为失败
@@ -798,7 +929,7 @@ export class LogParser {
 
             // 重置当前节点状态
             currentNextList = []
-            recognitionAttempts.length = 0
+            currentTaskRecognitions.length = 0
             nestedActionNodes.length = 0
             actionLevelRecognitionNodes.length = 0
             subTasks.clear()
@@ -819,7 +950,7 @@ export class LogParser {
 
         case 'Node.Recognition.Starting':
           if (subTaskId != null) {
-            startRecognitionAttempt(subTaskId, details, event.timestamp)
+            startRecognitionAttempt(subTaskId, details, event.timestamp, eventOrder)
           }
           break
 
@@ -830,7 +961,8 @@ export class LogParser {
             subTaskId,
             details,
             event.timestamp,
-            message === 'Node.Recognition.Succeeded' ? 'success' : 'failed'
+            message === 'Node.Recognition.Succeeded' ? 'success' : 'failed',
+            eventOrder
           )
           if (attempt) {
             subTasks.addRecognition(subTaskId, attempt)
@@ -840,7 +972,9 @@ export class LogParser {
 
         case 'Node.Action.Starting':
           if (subTaskId != null && details.action_id != null) {
-            subTaskActionStartTimes.set(scopedKey(subTaskId, details.action_id), this.stringPool.intern(event.timestamp))
+            const actionKey = scopedKey(subTaskId, details.action_id)
+            subTaskActionStartTimes.set(actionKey, this.stringPool.intern(event.timestamp))
+            subTaskActionStartOrders.set(actionKey, eventOrder)
           }
           break
 
@@ -855,6 +989,7 @@ export class LogParser {
             : endTimestamp
           if (actionKey) {
             subTaskActionEndTimes.set(actionKey, endTimestamp)
+            subTaskActionEndOrders.set(actionKey, eventOrder)
           }
           subTasks.addAction(subTaskId, {
             action_id: details.action_id,
@@ -875,14 +1010,12 @@ export class LogParser {
           const normalizedNestedRecognitions = dedupeRecognitionAttempts(nestedRecognitions)
           const parentRecognition = findActiveParentRecognition(subTaskId)
           if (normalizedNestedRecognitions.length > 0) {
-            if (parentRecognition) {
-              for (const recognition of normalizedNestedRecognitions) {
+            for (const recognition of normalizedNestedRecognitions) {
+              if (parentRecognition && parentRecognition.reco_id !== recognition.reco_id) {
                 attachNodeToAttempt(parentRecognition, recognition)
+                continue
               }
-            } else {
-              for (const recognition of normalizedNestedRecognitions) {
-                subTasks.addRecognitionNode(subTaskId, recognition)
-              }
+              subTasks.addRecognition(subTaskId, recognition)
             }
             break
           }
@@ -898,11 +1031,12 @@ export class LogParser {
             error_image: this.findRecognitionImage(event.timestamp, details.name || ''),
             vision_image: this.findVisionImage(event.timestamp, details.name || '', details.reco_details?.reco_id || details.node_id)
           }
-          if (parentRecognition) {
+          recognitionOrderMeta.set(recoNodeAttempt, { startSeq: eventOrder, endSeq: eventOrder })
+          if (parentRecognition && parentRecognition.reco_id !== recoNodeAttempt.reco_id) {
             attachNodeToAttempt(parentRecognition, recoNodeAttempt)
-          } else {
-            subTasks.addRecognitionNode(subTaskId, recoNodeAttempt)
+            break
           }
+          subTasks.addRecognitionNode(subTaskId, recoNodeAttempt)
           break
         }
 
@@ -936,6 +1070,8 @@ export class LogParser {
           const actionKey = actionId != null ? scopedKey(subTaskId, actionId) : null
           const actionStartTimestamp = actionKey ? subTaskActionStartTimes.get(actionKey) : undefined
           const actionEndTimestamp = actionKey ? subTaskActionEndTimes.get(actionKey) : undefined
+          const actionStartOrder = actionKey ? subTaskActionStartOrders.get(actionKey) : undefined
+          const actionEndOrder = actionKey ? subTaskActionEndOrders.get(actionKey) : undefined
           const taskActions = subTasks.consumeActions(subTaskId)
           let matchedTaskAction: any | undefined
           let matchedTaskActionIndex = -1
@@ -963,9 +1099,41 @@ export class LogParser {
           const mergedActionEndTimestamp = actionEndTimestamp || matchedTaskAction?.end_timestamp
           const taskRecognitions = dedupeRecognitionAttempts(subTasks.consumeRecognitions(subTaskId))
           const recognitionNodes = dedupeRecognitionAttempts(subTasks.consumeRecognitionNodes(subTaskId))
-          const attachedRecognitions = attachRecognitionNodesToAttempts(taskRecognitions, recognitionNodes)
-          if (attachedRecognitions.orphans.length > 0) {
-            actionLevelRecognitionNodes.push(...attachedRecognitions.orphans)
+          const scopedTaskRecognitions: RecognitionAttempt[] = []
+          const scopedRecognitionNodes: RecognitionAttempt[] = []
+          const outOfScopeActionRecognitions: RecognitionAttempt[] = []
+
+          const isInActionScope = (attempt: RecognitionAttempt): boolean => {
+            if (actionStartOrder == null) return true
+            const meta = recognitionOrderMeta.get(attempt)
+            if (!meta) return true
+            if (meta.endSeq < actionStartOrder) return false
+            if (actionEndOrder != null && meta.startSeq > actionEndOrder) return false
+            return true
+          }
+
+          for (const attempt of taskRecognitions) {
+            if (isInActionScope(attempt)) {
+              scopedTaskRecognitions.push(attempt)
+            } else {
+              outOfScopeActionRecognitions.push(attempt)
+            }
+          }
+          for (const nodeAttempt of recognitionNodes) {
+            if (isInActionScope(nodeAttempt)) {
+              scopedRecognitionNodes.push(nodeAttempt)
+            } else {
+              outOfScopeActionRecognitions.push(nodeAttempt)
+            }
+          }
+
+          const attachedRecognitions = attachRecognitionNodesToAttempts(scopedTaskRecognitions, scopedRecognitionNodes)
+          const escapedActionRecognitions = dedupeRecognitionAttempts([
+            ...outOfScopeActionRecognitions,
+            ...attachedRecognitions.orphans
+          ])
+          if (escapedActionRecognitions.length > 0) {
+            actionLevelRecognitionNodes.push(...escapedActionRecognitions)
           }
           const fallbackRecoDetails =
             details.reco_details ||
@@ -989,6 +1157,8 @@ export class LogParser {
           if (actionKey) {
             subTaskActionStartTimes.delete(actionKey)
             subTaskActionEndTimes.delete(actionKey)
+            subTaskActionStartOrders.delete(actionKey)
+            subTaskActionEndOrders.delete(actionKey)
           }
           break
         }
