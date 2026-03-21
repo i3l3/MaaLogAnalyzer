@@ -260,6 +260,7 @@ const actionButtonType = computed<ButtonType>(() => {
           :merged-recognition-list="mergedRecognitionList"
           :recognition-expanded="recognitionExpanded"
           :action-expanded="actionExpanded"
+          :default-collapse-nested-recognition="settings.defaultCollapseNestedRecognition"
           :default-collapse-nested-action-nodes="settings.defaultCollapseNestedActionNodes"
           :is-expanded="isExpanded"
           @select-node="emit('select-node', $event)"

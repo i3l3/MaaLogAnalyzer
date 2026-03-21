@@ -9,6 +9,7 @@ const props = defineProps<{
   mergedRecognitionList: MergedRecognitionItem[]
   recognitionExpanded?: boolean
   actionExpanded?: boolean
+  defaultCollapseNestedRecognition?: boolean
   defaultCollapseNestedActionNodes?: boolean
   isExpanded?: (attemptIndex: number) => boolean
 }>()
@@ -35,11 +36,14 @@ interface FlattenedNestedRecognition {
   attempt: RecognitionAttempt
   flowItemId: string
   depth: number
+  hasChildren: boolean
+  expanded: boolean
 }
 
 const flattenNestedRecognitionNodes = (
   attempts: RecognitionAttempt[] | undefined,
   parentFlowItemId: string,
+  isExpanded: (flowItemId: string) => boolean,
   depth = 1
 ): FlattenedNestedRecognition[] => {
   if (!attempts || attempts.length === 0) return []
@@ -48,13 +52,17 @@ const flattenNestedRecognitionNodes = (
   for (let i = 0; i < attempts.length; i++) {
     const attempt = attempts[i]
     const flowItemId = `${parentFlowItemId}.nested.${i}`
+    const hasChildren = !!(attempt.nested_nodes && attempt.nested_nodes.length > 0)
+    const expanded = hasChildren ? isExpanded(flowItemId) : false
     result.push({
       attempt,
       flowItemId,
       depth,
+      hasChildren,
+      expanded,
     })
-    if (attempt.nested_nodes && attempt.nested_nodes.length > 0) {
-      result.push(...flattenNestedRecognitionNodes(attempt.nested_nodes, flowItemId, depth + 1))
+    if (hasChildren && expanded) {
+      result.push(...flattenNestedRecognitionNodes(attempt.nested_nodes, flowItemId, isExpanded, depth + 1))
     }
   }
   return result
@@ -63,6 +71,18 @@ const flattenNestedRecognitionNodes = (
 const isRecognitionNestedExpanded = (attemptIndex: number): boolean => {
   if (props.isExpanded) return props.isExpanded(attemptIndex)
   return true
+}
+
+const expandedNestedRecognitionItems = ref<Map<string, boolean>>(new Map())
+
+const isNestedRecognitionFlowItemExpanded = (flowItemId: string): boolean => {
+  const value = expandedNestedRecognitionItems.value.get(flowItemId)
+  if (value !== undefined) return value
+  return !(props.defaultCollapseNestedRecognition ?? true)
+}
+
+const toggleNestedRecognitionFlowItemExpand = (flowItemId: string) => {
+  expandedNestedRecognitionItems.value.set(flowItemId, !isNestedRecognitionFlowItemExpanded(flowItemId))
 }
 
 const expandedFlowItems = ref<Map<string, boolean>>(new Map())
@@ -81,8 +101,14 @@ const resetFlowItemExpandState = () => {
   expandedFlowItems.value.clear()
 }
 
+const resetNestedRecognitionExpandState = () => {
+  expandedNestedRecognitionItems.value.clear()
+}
+
 watch(() => props.node.node_id, resetFlowItemExpandState, { flush: 'sync' })
 watch(() => props.defaultCollapseNestedActionNodes, resetFlowItemExpandState, { flush: 'sync' })
+watch(() => props.node.node_id, resetNestedRecognitionExpandState, { flush: 'sync' })
+watch(() => props.defaultCollapseNestedRecognition, resetNestedRecognitionExpandState, { flush: 'sync' })
 
 const flattenFlowItemsForTree = (
   items: UnifiedFlowItem[] | undefined,
@@ -206,23 +232,37 @@ const getFlowItemTypeLabel = (type: UnifiedFlowItem['type']) => {
             class="tree-list"
           >
             <li
-              v-for="nested in flattenNestedRecognitionNodes(item.attempt.nested_nodes, `node.recognition.${item.attemptIndex}`)"
+              v-for="nested in flattenNestedRecognitionNodes(item.attempt.nested_nodes, `node.recognition.${item.attemptIndex}`, isNestedRecognitionFlowItemExpanded)"
               :key="`tree-rec-nested-${item.attemptIndex}-${nested.flowItemId}`"
               class="tree-item"
             >
-              <n-button
-                text
-                size="tiny"
-                :type="nested.attempt.status === 'success' ? 'success' : 'warning'"
-                :style="{ marginLeft: `${nested.depth * 12}px` }"
-                @click="emit('select-flow-item', node, nested.flowItemId)"
-              >
-                <template #icon>
-                  <check-circle-outlined v-if="nested.attempt.status === 'success'" />
-                  <close-circle-outlined v-else />
-                </template>
-                [RecNode] {{ nested.attempt.name }}
-              </n-button>
+              <n-flex align="center" style="gap: 4px">
+                <span
+                  v-if="nested.hasChildren"
+                  class="tree-toggle"
+                  :class="{ 'tree-toggle-collapsed': !nested.expanded }"
+                  :style="{ marginLeft: `${nested.depth * 12}px` }"
+                  @click.stop="toggleNestedRecognitionFlowItemExpand(nested.flowItemId)"
+                />
+                <span
+                  v-else
+                  class="tree-toggle-placeholder"
+                  :style="{ marginLeft: `${nested.depth * 12}px` }"
+                />
+                <n-button
+                  text
+                  size="tiny"
+                  :type="nested.attempt.status === 'success' ? 'success' : 'warning'"
+                  style="margin-left: 12px"
+                  @click="emit('select-flow-item', node, nested.flowItemId)"
+                >
+                  <template #icon>
+                    <check-circle-outlined v-if="nested.attempt.status === 'success'" />
+                    <close-circle-outlined v-else />
+                  </template>
+                  [RecNode] {{ nested.attempt.name }}
+                </n-button>
+              </n-flex>
             </li>
           </ul>
         </template>
