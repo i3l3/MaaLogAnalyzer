@@ -403,9 +403,68 @@ const flattenFlowItems = (items: UnifiedFlowItem[] | undefined, output: UnifiedF
   return output
 }
 
+const hasSyntheticRecognitionId = (node: NodeInfo, flowItemId: string): boolean => {
+  const rootMatch = /^node\.recognition\.(\d+)(.*)$/.exec(flowItemId)
+  if (!rootMatch) return false
+
+  let attempt: any = node.recognition_attempts?.[Number(rootMatch[1])]
+  if (!attempt) return false
+
+  let remaining = rootMatch[2] || ''
+  while (remaining.length > 0) {
+    const nestedMatch = /^\.nested\.(\d+)(.*)$/.exec(remaining)
+    if (!nestedMatch) return false
+    attempt = attempt.nested_nodes?.[Number(nestedMatch[1])]
+    if (!attempt) return false
+    remaining = nestedMatch[2] || ''
+  }
+
+  return true
+}
+
+const hasSyntheticActionId = (node: NodeInfo, flowItemId: string): boolean => {
+  if (/^node\.action\.\d+$/.test(flowItemId)) {
+    return !!node.action_details
+  }
+
+  const actionRecoMatch = /^node\.action\.recognition\.(\d+)$/.exec(flowItemId)
+  if (actionRecoMatch) {
+    const idx = Number(actionRecoMatch[1])
+    return idx >= 0 && idx < (node.nested_recognition_in_action?.length ?? 0)
+  }
+
+  return false
+}
+
+const hasLegacyNestedActionId = (node: NodeInfo, flowItemId: string): boolean => {
+  const legacyActionMatch = /^task\.(\d+)\.action\.(\d+)\.(\d+)$/.exec(flowItemId)
+  if (legacyActionMatch) {
+    const groupIdx = Number(legacyActionMatch[1])
+    const nestedIdx = Number(legacyActionMatch[2])
+    const nodeId = Number(legacyActionMatch[3])
+    const nested = node.nested_action_nodes?.[groupIdx]?.nested_actions?.[nestedIdx]
+    return !!nested && nested.node_id === nodeId
+  }
+
+  const legacyRecoMatch = /^task\.(\d+)\.action\.(\d+)\.reco\.(\d+)$/.exec(flowItemId)
+  if (legacyRecoMatch) {
+    const groupIdx = Number(legacyRecoMatch[1])
+    const nestedIdx = Number(legacyRecoMatch[2])
+    const recoIdx = Number(legacyRecoMatch[3])
+    const nested = node.nested_action_nodes?.[groupIdx]?.nested_actions?.[nestedIdx]
+    return !!nested && recoIdx >= 0 && recoIdx < (nested.recognition_attempts?.length ?? 0)
+  }
+
+  return false
+}
+
 const hasFlowItemId = (node: NodeInfo | null, flowItemId: string | null | undefined): boolean => {
   if (!node || !flowItemId) return false
-  return flattenFlowItems(node.flow_items).some(item => item.id === flowItemId)
+  if (flattenFlowItems(node.flow_items).some(item => item.id === flowItemId)) return true
+  if (hasSyntheticRecognitionId(node, flowItemId)) return true
+  if (hasSyntheticActionId(node, flowItemId)) return true
+  if (hasLegacyNestedActionId(node, flowItemId)) return true
+  return false
 }
 
 const pickMainActionFlowItemId = (node: NodeInfo): string | null => {
@@ -1268,13 +1327,21 @@ const handleSelectNestedAction = (node: NodeInfo, actionIndex: number, nestedInd
     selectedFlowItemId.value = null
     return
   }
-  selectedFlowItemId.value = pickFlowId(node, `task.${actionIndex}.action.${nestedIndex}.${nestedAction.node_id}`)
+  selectedFlowItemId.value = pickFlowId(node, `task.${actionIndex}.pipeline.${nestedIndex}.${nestedAction.node_id}`)
 }
 
 // 选择嵌套动作中的识别尝试（例如 CCUpdate 下的某次识别）
 const handleSelectNestedActionRecognition = (node: NodeInfo, actionIndex: number, nestedIndex: number, attemptIndex: number) => {
   selectedNode.value = node
-  selectedFlowItemId.value = pickFlowId(node, `task.${actionIndex}.action.${nestedIndex}.reco.${attemptIndex}`)
+  const nestedAction = node.nested_action_nodes?.[actionIndex]?.nested_actions?.[nestedIndex]
+  if (!nestedAction) {
+    selectedFlowItemId.value = null
+    return
+  }
+  selectedFlowItemId.value = pickFlowId(
+    node,
+    `task.${actionIndex}.pipeline.${nestedIndex}.${nestedAction.node_id}.recognition.${attemptIndex}`
+  )
 }
 
 // 选择任意 flow item（用于深层嵌套识别）

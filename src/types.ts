@@ -109,7 +109,7 @@ export interface NodeInfo {
   focus?: any
   next_list: NextListItem[]  // Next 列表
   recognition_attempts: RecognitionAttempt[]  // 识别尝试历史（包括失败的）
-  flow_items?: UnifiedFlowItem[]  // 统一事件流（recognition/action/task）
+  flow_items?: UnifiedFlowItem[]  // Action 期递归事件流（task/pipeline/recognition/action，可递归）
   nested_action_nodes?: NestedActionGroup[]  // 嵌套的 ActionNode 事件（custom action）
   nested_recognition_in_action?: RecognitionAttempt[]  // 在 custom action 中产生的 RecognitionNode
   node_details?: {
@@ -155,7 +155,13 @@ export interface ActionDetail {
   end_timestamp?: string
 }
 
-export type UnifiedFlowType = 'recognition' | 'action' | 'task'
+export type UnifiedFlowType =
+  | 'task'
+  | 'pipeline_node'
+  | 'recognition'
+  | 'recognition_node'
+  | 'action'
+  | 'action_node'
 
 export interface UnifiedFlowItem {
   id: string
@@ -170,6 +176,7 @@ export interface UnifiedFlowItem {
   reco_id?: number
   action_id?: number
   task_details?: NestedActionGroup['task_details']
+  raw?: Record<string, any>
   reco_details?: RecognitionDetail
   action_details?: ActionDetail
   error_image?: string
@@ -179,6 +186,6 @@ export interface UnifiedFlowItem {
 
 export interface UnifiedFlowGroup {
   type: UnifiedFlowType
-  title: 'Recognition' | 'Action' | 'Task'
+  title: string
   items: UnifiedFlowItem[]
 }

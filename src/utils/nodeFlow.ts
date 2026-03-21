@@ -7,8 +7,11 @@ import type {
 } from '../types'
 
 const flowTitleMap: Record<UnifiedFlowItem['type'], UnifiedFlowGroup['title']> = {
+  pipeline_node: 'PipelineNode',
   recognition: 'Recognition',
+  recognition_node: 'RecognitionNode',
   action: 'Action',
+  action_node: 'ActionNode',
   task: 'Task',
 }
 
@@ -23,8 +26,6 @@ const flowItemTimestampMs = (item: UnifiedFlowItem): number => {
   return toTimestampMs(item.start_timestamp || item.timestamp || item.end_timestamp)
 }
 
-const FLOW_ATTACH_JITTER_MS = 20
-
 const sortFlowItems = (items: UnifiedFlowItem[]): UnifiedFlowItem[] => {
   return items
     .map((item, index) => ({ item, index }))
@@ -36,52 +37,6 @@ const sortFlowItems = (items: UnifiedFlowItem[]): UnifiedFlowItem[] => {
     .map(({ item }) => item)
 }
 
-const mapRecognitionAttempt = (attempt: RecognitionAttempt, id: string): UnifiedFlowItem => {
-  const children = (attempt.nested_nodes ?? []).map((nested, nestedIndex) =>
-    mapRecognitionAttempt(nested, `${id}.nested.${nestedIndex}`)
-  )
-  return {
-    id,
-    type: 'recognition',
-    name: attempt.name,
-    status: attempt.status,
-    timestamp: attempt.timestamp,
-    start_timestamp: attempt.start_timestamp,
-    end_timestamp: attempt.end_timestamp,
-    reco_id: attempt.reco_id,
-    reco_details: attempt.reco_details,
-    error_image: attempt.error_image,
-    vision_image: attempt.vision_image,
-    children: children.length > 0 ? sortFlowItems(children) : undefined,
-  }
-}
-
-const mapNestedActionNode = (
-  action: NestedActionNode,
-  groupIndex: number,
-  actionIndex: number,
-  ownerTaskId: number
-): UnifiedFlowItem => {
-  const recognitionChildren = (action.recognition_attempts ?? []).map((attempt, attemptIndex) =>
-    mapRecognitionAttempt(attempt, `task.${groupIndex}.action.${actionIndex}.reco.${attemptIndex}`)
-  )
-  return {
-    id: `task.${groupIndex}.action.${actionIndex}.${action.node_id}`,
-    type: 'action',
-    name: action.name,
-    status: action.status,
-    timestamp: action.timestamp,
-    start_timestamp: action.start_timestamp,
-    end_timestamp: action.end_timestamp,
-    task_id: ownerTaskId,
-    node_id: action.node_id,
-    action_id: action.action_details?.action_id,
-    action_details: action.action_details,
-    reco_details: action.reco_details,
-    children: recognitionChildren.length > 0 ? sortFlowItems(recognitionChildren) : undefined,
-  }
-}
-
 const sortFlowTree = (item: UnifiedFlowItem): UnifiedFlowItem => {
   if (!item.children || item.children.length === 0) return item
   const sortedChildren = sortFlowItems(item.children).map(sortFlowTree)
@@ -91,81 +46,115 @@ const sortFlowTree = (item: UnifiedFlowItem): UnifiedFlowItem => {
   }
 }
 
-const getItemRangeMs = (item: UnifiedFlowItem): { start: number; end: number } | null => {
-  const startMs = toTimestampMs(item.start_timestamp || item.timestamp)
-  const endMsRaw = toTimestampMs(item.end_timestamp || item.timestamp || item.start_timestamp)
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMsRaw)) return null
-  const start = Math.min(startMs, endMsRaw)
-  const end = Math.max(startMs, endMsRaw)
-  return { start, end }
+const mapRecognitionAttempt = (
+  attempt: RecognitionAttempt,
+  id: string,
+  nestedNode = false
+): UnifiedFlowItem => {
+  const children = (attempt.nested_nodes ?? []).map((nested, nestedIndex) =>
+    mapRecognitionAttempt(nested, `${id}.nested.${nestedIndex}`, true)
+  )
+  return {
+    id,
+    type: nestedNode ? 'recognition_node' : 'recognition',
+    name: attempt.name,
+    status: attempt.status,
+    timestamp: attempt.timestamp,
+    start_timestamp: attempt.start_timestamp,
+    end_timestamp: attempt.end_timestamp,
+    reco_id: attempt.reco_id,
+    raw: {
+      reco_id: attempt.reco_id,
+      name: attempt.name,
+      timestamp: attempt.timestamp,
+      start_timestamp: attempt.start_timestamp,
+      end_timestamp: attempt.end_timestamp,
+      status: attempt.status,
+    },
+    reco_details: attempt.reco_details,
+    error_image: attempt.error_image,
+    vision_image: attempt.vision_image,
+    children: children.length > 0 ? sortFlowItems(children) : undefined,
+  }
 }
 
-const canContainTimestamp = (actionItem: UnifiedFlowItem, targetMs: number): boolean => {
-  if (actionItem.type !== 'action') return false
-  const range = getItemRangeMs(actionItem)
-  if (!range) return false
-  return targetMs >= range.start - FLOW_ATTACH_JITTER_MS && targetMs <= range.end + FLOW_ATTACH_JITTER_MS
+const mapActionItem = (
+  id: string,
+  name: string,
+  status: 'success' | 'failed',
+  startTimestamp: string | undefined,
+  endTimestamp: string | undefined,
+  actionDetails: UnifiedFlowItem['action_details'],
+  actionId?: number,
+  type: 'action' | 'action_node' = 'action'
+): UnifiedFlowItem => {
+  const fallbackTs = startTimestamp || endTimestamp || ''
+  return {
+    id,
+    type,
+    name,
+    status,
+    timestamp: fallbackTs,
+    start_timestamp: startTimestamp,
+    end_timestamp: endTimestamp,
+    action_id: actionId,
+    action_details: actionDetails,
+    raw: actionDetails ? { ...actionDetails } : undefined,
+  }
 }
 
-const attachChild = (parent: UnifiedFlowItem, child: UnifiedFlowItem): void => {
-  const next = parent.children ? [...parent.children, child] : [child]
-  parent.children = sortFlowItems(next)
-}
-
-const findBestActionParent = (roots: UnifiedFlowItem[], child: UnifiedFlowItem): UnifiedFlowItem | null => {
-  const targetMs = flowItemTimestampMs(child)
-  if (!Number.isFinite(targetMs)) return null
-
-  type Candidate = {
-    item: UnifiedFlowItem
-    depth: number
-    span: number
-    start: number
+const mapNestedPipelineNode = (
+  nestedNode: NestedActionNode,
+  groupIndex: number,
+  nodeIndex: number,
+  ownerTaskId: number
+): UnifiedFlowItem => {
+  const baseId = `task.${groupIndex}.pipeline.${nodeIndex}.${nestedNode.node_id}`
+  const recognitionChildren = (nestedNode.recognition_attempts ?? []).map((attempt, attemptIndex) =>
+    mapRecognitionAttempt(attempt, `${baseId}.recognition.${attemptIndex}`)
+  )
+  const actionChild = nestedNode.action_details
+    ? mapActionItem(
+        `${baseId}.action.${nestedNode.action_details.action_id ?? nestedNode.node_id}`,
+        nestedNode.action_details.name || nestedNode.name,
+        nestedNode.action_details.success ? 'success' : 'failed',
+        nestedNode.action_details.start_timestamp || nestedNode.start_timestamp,
+        nestedNode.action_details.end_timestamp || nestedNode.end_timestamp,
+        nestedNode.action_details,
+        nestedNode.action_details.action_id,
+        'action'
+      )
+    : null
+  const children = actionChild
+    ? sortFlowItems([...recognitionChildren, actionChild])
+    : sortFlowItems(recognitionChildren)
+  return {
+    id: baseId,
+    type: 'pipeline_node',
+    name: nestedNode.name,
+    status: nestedNode.status,
+    timestamp: nestedNode.start_timestamp || nestedNode.timestamp || nestedNode.end_timestamp || '',
+    start_timestamp: nestedNode.start_timestamp || nestedNode.timestamp,
+    end_timestamp: nestedNode.end_timestamp,
+    task_id: ownerTaskId,
+    node_id: nestedNode.node_id,
+    reco_details: nestedNode.reco_details,
+    action_details: nestedNode.action_details,
+    raw: {
+      node_id: nestedNode.node_id,
+      name: nestedNode.name,
+      status: nestedNode.status,
+      reco_details: nestedNode.reco_details,
+      action_details: nestedNode.action_details,
+    },
+    children: children.length > 0 ? children : undefined,
   }
-
-  let best: Candidate | null = null
-
-  const visit = (item: UnifiedFlowItem, depth: number) => {
-    if (item.type === 'action' && item.task_id !== child.task_id && canContainTimestamp(item, targetMs)) {
-      const range = getItemRangeMs(item)
-      if (range) {
-        const span = range.end - range.start
-        const candidate: Candidate = {
-          item,
-          depth,
-          span,
-          start: range.start,
-        }
-        if (!best) {
-          best = candidate
-        } else if (candidate.depth > best.depth) {
-          best = candidate
-        } else if (candidate.depth === best.depth && candidate.span < best.span) {
-          best = candidate
-        } else if (candidate.depth === best.depth && candidate.span === best.span && candidate.start > best.start) {
-          best = candidate
-        }
-      }
-    }
-
-    if (item.children && item.children.length > 0) {
-      for (const childItem of item.children) {
-        visit(childItem, depth + 1)
-      }
-    }
-  }
-
-  for (const root of roots) {
-    visit(root, 0)
-  }
-  const resolvedBest = best as Candidate | null
-  return resolvedBest ? resolvedBest.item : null
 }
 
 const buildTaskFlowItems = (node: NodeInfo): UnifiedFlowItem[] => {
   return (node.nested_action_nodes ?? []).map((group, groupIndex) => {
-    const actionChildren = (group.nested_actions ?? []).map((action, actionIndex) =>
-      mapNestedActionNode(action, groupIndex, actionIndex, group.task_id)
+    const pipelineChildren = (group.nested_actions ?? []).map((nested, nodeIndex) =>
+      mapNestedPipelineNode(nested, groupIndex, nodeIndex, group.task_id)
     )
     return {
       id: `node.task.${groupIndex}.${group.task_id}`,
@@ -177,70 +166,37 @@ const buildTaskFlowItems = (node: NodeInfo): UnifiedFlowItem[] => {
       end_timestamp: group.end_timestamp,
       task_id: group.task_id,
       task_details: group.task_details,
-      children: actionChildren.length > 0 ? sortFlowItems(actionChildren) : undefined,
+      raw: group.task_details
+        ? { ...group.task_details }
+        : {
+            task_id: group.task_id,
+            name: group.name,
+            status: group.status,
+            start_timestamp: group.start_timestamp || group.timestamp,
+            end_timestamp: group.end_timestamp,
+          },
+      children: pipelineChildren.length > 0 ? sortFlowItems(pipelineChildren) : undefined,
     }
   })
 }
 
 export const buildNodeFlowItems = (node: NodeInfo): UnifiedFlowItem[] => {
-  const flowItems: UnifiedFlowItem[] = []
+  const roots: UnifiedFlowItem[] = []
 
-  const topRecognitions = (node.recognition_attempts ?? []).map((attempt, attemptIndex) =>
-    mapRecognitionAttempt(attempt, `node.recognition.${attemptIndex}`)
-  )
-  flowItems.push(...topRecognitions)
-
-  const actionLevelRecognitions = (node.nested_recognition_in_action ?? []).map((attempt, attemptIndex) =>
-    mapRecognitionAttempt(attempt, `node.action.recognition.${attemptIndex}`)
+  const actionLevelRecognitionNodes = (node.nested_recognition_in_action ?? []).map((attempt, attemptIndex) =>
+    mapRecognitionAttempt(attempt, `node.action.recognition.${attemptIndex}`, true)
   )
 
   const taskItems = buildTaskFlowItems(node)
 
-  if (node.action_details) {
-    const actionTimestamp =
-      node.action_details.start_timestamp ||
-      node.action_details.end_timestamp ||
-      node.end_timestamp ||
-      node.timestamp
-    const rootActionItem: UnifiedFlowItem = {
-      id: `node.action.${node.action_details.action_id}`,
-      type: 'action',
-      name: node.action_details.name,
-      status: node.action_details.success ? 'success' : 'failed',
-      timestamp: actionTimestamp,
-      start_timestamp: node.action_details.start_timestamp,
-      end_timestamp: node.action_details.end_timestamp,
-      action_id: node.action_details.action_id,
-      action_details: node.action_details,
-    }
+  // 顶层 PipelineNode 的 Node.Recognition / Node.Action 使用结构化字段展示：
+  // - recognition_attempts
+  // - action_details
+  // flow_items 仅承载 Action 期间递归产生的事件树（task / pipeline / recognition_node / action_node）。
+  roots.push(...actionLevelRecognitionNodes)
+  roots.push(...taskItems)
 
-    // 优先把 action 级识别和 task 挂到最合适的 action（支持多层嵌套）
-    const pendingChildren = sortFlowItems([
-      ...actionLevelRecognitions,
-      ...taskItems,
-    ])
-    for (const child of pendingChildren) {
-      const parent = findBestActionParent([rootActionItem], child)
-      attachChild(parent ?? rootActionItem, child)
-    }
-
-    flowItems.push(sortFlowTree(rootActionItem))
-  } else {
-    // 无主 action: 在根层中尽量按时间挂到最合适的 action，否则保持根层。
-    const roots = [...sortFlowItems(actionLevelRecognitions)]
-    const pendingTasks = sortFlowItems(taskItems)
-    for (const taskItem of pendingTasks) {
-      const parent = findBestActionParent(roots, taskItem)
-      if (parent) {
-        attachChild(parent, taskItem)
-      } else {
-        roots.push(taskItem)
-      }
-    }
-    flowItems.push(...sortFlowItems(roots).map(sortFlowTree))
-  }
-
-  return sortFlowItems(flowItems)
+  return sortFlowItems(roots).map(sortFlowTree)
 }
 
 export const groupFlowItemsByType = (items: UnifiedFlowItem[]): UnifiedFlowGroup[] => {

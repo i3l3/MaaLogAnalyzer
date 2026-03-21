@@ -53,10 +53,122 @@ const pickFirstErrorImage = (items: UnifiedFlowItem[] | undefined): string | nul
   return null
 }
 
+const toRecognitionFlowItem = (
+  flowItemId: string,
+  attempt: any,
+  type: 'recognition' | 'recognition_node'
+): UnifiedFlowItem => {
+  return {
+    id: flowItemId,
+    type,
+    name: attempt.name || '',
+    status: attempt.status === 'success' ? 'success' : 'failed',
+    timestamp: attempt.timestamp || attempt.start_timestamp || attempt.end_timestamp || '',
+    start_timestamp: attempt.start_timestamp,
+    end_timestamp: attempt.end_timestamp,
+    reco_id: attempt.reco_id,
+    reco_details: attempt.reco_details,
+    error_image: attempt.error_image,
+    vision_image: attempt.vision_image,
+    raw: {
+      reco_id: attempt.reco_id,
+      name: attempt.name,
+      timestamp: attempt.timestamp,
+      start_timestamp: attempt.start_timestamp,
+      end_timestamp: attempt.end_timestamp,
+      status: attempt.status,
+    },
+  }
+}
+
+const resolveRecognitionPath = (node: NodeInfo, flowItemId: string): UnifiedFlowItem | null => {
+  const rootMatch = /^node\.recognition\.(\d+)(.*)$/.exec(flowItemId)
+  if (!rootMatch) return null
+
+  let attempt: any = node.recognition_attempts?.[Number(rootMatch[1])]
+  if (!attempt) return null
+
+  let remaining = rootMatch[2] || ''
+  let isNested = false
+  while (remaining.length > 0) {
+    const nestedMatch = /^\.nested\.(\d+)(.*)$/.exec(remaining)
+    if (!nestedMatch) return null
+    attempt = attempt.nested_nodes?.[Number(nestedMatch[1])]
+    if (!attempt) return null
+    remaining = nestedMatch[2] || ''
+    isNested = true
+  }
+
+  return toRecognitionFlowItem(flowItemId, attempt, isNested ? 'recognition_node' : 'recognition')
+}
+
+const resolveSyntheticFlowItem = (node: NodeInfo, flowItemId: string): UnifiedFlowItem | null => {
+  const recognitionItem = resolveRecognitionPath(node, flowItemId)
+  if (recognitionItem) return recognitionItem
+
+  const actionRecoMatch = /^node\.action\.recognition\.(\d+)$/.exec(flowItemId)
+  if (actionRecoMatch) {
+    const attempt = node.nested_recognition_in_action?.[Number(actionRecoMatch[1])]
+    if (!attempt) return null
+    return toRecognitionFlowItem(flowItemId, attempt, 'recognition_node')
+  }
+
+  if (/^node\.action\.\d+$/.test(flowItemId) && node.action_details) {
+    const action = node.action_details
+    return {
+      id: flowItemId,
+      type: 'action',
+      name: action.name || node.name,
+      status: action.success ? 'success' : 'failed',
+      timestamp: action.start_timestamp || action.end_timestamp || node.end_timestamp || node.timestamp,
+      start_timestamp: action.start_timestamp,
+      end_timestamp: action.end_timestamp,
+      action_id: action.action_id,
+      action_details: action,
+      raw: { ...action },
+    }
+  }
+
+  const legacyNestedActionMatch = /^task\.(\d+)\.action\.(\d+)\.(\d+)$/.exec(flowItemId)
+  if (legacyNestedActionMatch) {
+    const groupIdx = Number(legacyNestedActionMatch[1])
+    const nestedIdx = Number(legacyNestedActionMatch[2])
+    const nodeId = Number(legacyNestedActionMatch[3])
+    const nested = node.nested_action_nodes?.[groupIdx]?.nested_actions?.[nestedIdx]
+    if (!nested || nested.node_id !== nodeId) return null
+    return {
+      id: flowItemId,
+      type: 'action_node',
+      name: nested.action_details?.name || nested.name,
+      status: nested.action_details?.success ? 'success' : nested.status,
+      timestamp: nested.action_details?.start_timestamp || nested.start_timestamp || nested.timestamp,
+      start_timestamp: nested.action_details?.start_timestamp || nested.start_timestamp,
+      end_timestamp: nested.action_details?.end_timestamp || nested.end_timestamp,
+      action_id: nested.action_details?.action_id,
+      action_details: nested.action_details,
+      raw: nested.action_details ? { ...nested.action_details } : undefined,
+    }
+  }
+
+  const legacyNestedRecoMatch = /^task\.(\d+)\.action\.(\d+)\.reco\.(\d+)$/.exec(flowItemId)
+  if (legacyNestedRecoMatch) {
+    const groupIdx = Number(legacyNestedRecoMatch[1])
+    const nestedIdx = Number(legacyNestedRecoMatch[2])
+    const attemptIdx = Number(legacyNestedRecoMatch[3])
+    const attempt = node.nested_action_nodes?.[groupIdx]?.nested_actions?.[nestedIdx]?.recognition_attempts?.[attemptIdx]
+    if (!attempt) return null
+    return toRecognitionFlowItem(flowItemId, attempt, 'recognition_node')
+  }
+
+  return null
+}
+
 const selectedFlowItem = computed<UnifiedFlowItem | null>(() => {
   if (!props.selectedNode || !props.selectedFlowItemId) return null
   const flattened = flattenFlowItems(props.selectedNode.flow_items)
-  return flattened.find(item => item.id === props.selectedFlowItemId) || null
+  const direct = flattened.find(item => item.id === props.selectedFlowItemId)
+  if (direct) return direct
+  return resolveSyntheticFlowItem(props.selectedNode, props.selectedFlowItemId)
 })
 
 const isFlowItemSelected = computed(() => !!selectedFlowItem.value)
@@ -96,7 +208,7 @@ const toFallbackRecognition = (source: any) => {
 const currentRecognitionItem = computed<UnifiedFlowItem | null>(() => {
   const selected = selectedFlowItem.value
   if (!selected) return null
-  if (selected.type === 'recognition') return selected
+  if (selected.type === 'recognition' || selected.type === 'recognition_node') return selected
   return null
 })
 
@@ -121,7 +233,8 @@ const hasRecognition = computed(() => {
 
 const currentActionItem = computed<UnifiedFlowItem | null>(() => {
   const selected = selectedFlowItem.value
-  if (!selected || selected.type !== 'action') return null
+  if (!selected) return null
+  if (selected.type !== 'action' && selected.type !== 'action_node') return null
   return selected
 })
 
@@ -162,9 +275,21 @@ const nodeExecutionTime = computed(() => {
   return pickStartTime(props.selectedNode?.start_timestamp, props.selectedNode?.timestamp, props.selectedNode?.end_timestamp)
 })
 
-const showTaskFallback = computed(() => {
-  return selectedFlowItem.value?.type === 'task' && !hasRecognition.value && !hasAction.value
+const showFlowFallback = computed(() => {
+  return !!selectedFlowItem.value && !hasRecognition.value && !hasAction.value
 })
+
+const getFlowTypeLabel = (type: UnifiedFlowItem['type']) => {
+  switch (type) {
+    case 'task': return 'Task'
+    case 'pipeline_node': return 'PipelineNode'
+    case 'recognition': return 'Recognition'
+    case 'recognition_node': return 'RecognitionNode'
+    case 'action': return 'Action'
+    case 'action_node': return 'ActionNode'
+    default: return type
+  }
+}
 
 const showNodeCompletedRow = computed(() => {
   const node = props.selectedNode
@@ -348,10 +473,10 @@ const copyToClipboard = (text: string) => {
           </n-collapse>
         </n-card>
 
-        <!-- Task fallback（无识别/动作详情时显示基本信息） -->
-        <n-card title="🧩 任务详情" v-if="showTaskFallback && selectedFlowItem">
+        <!-- Flow fallback（无识别/动作详情时显示基本信息） -->
+        <n-card title="🧩 事件详情" v-if="showFlowFallback && selectedFlowItem">
           <n-descriptions :column="descriptionColumns" size="small" label-placement="left" bordered>
-            <n-descriptions-item label="任务名称" :span="descriptionColumns">
+            <n-descriptions-item label="名称" :span="descriptionColumns">
               <n-flex align="center" style="gap: 8px">
                 <span style="font-weight: 500; font-size: 15px">
                   {{ selectedFlowItem.name }}
@@ -360,6 +485,10 @@ const copyToClipboard = (text: string) => {
                   {{ selectedFlowItem.status === 'success' ? '成功' : '失败' }}
                 </n-tag>
               </n-flex>
+            </n-descriptions-item>
+
+            <n-descriptions-item label="类型">
+              {{ getFlowTypeLabel(selectedFlowItem.type) }}
             </n-descriptions-item>
 
             <n-descriptions-item label="执行时间">
@@ -385,7 +514,7 @@ const copyToClipboard = (text: string) => {
 
           <!-- 原始数据 -->
           <n-collapse style="margin-top: 16px" :default-expanded-names="rawJsonDefaultExpanded">
-            <n-collapse-item title="原始任务数据" name="task-json">
+            <n-collapse-item title="原始事件数据" name="task-json">
               <template #header-extra>
                 <n-button
                   size="tiny"
