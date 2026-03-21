@@ -1858,35 +1858,61 @@ const collectFailureNodes = (task: TaskInfo | null, limit = 24) => {
   return rows
 }
 
-const collectSignalLines = (target: AiLoadedTarget, maxHits = 24, maxOutput = 60): SignalLineItem[] => {
-  const lines = target.content.split(/\r?\n/)
-  const hitIndexes: number[] = []
-
-  for (let i = 0; i < lines.length; i += 1) {
-    if (/\[(ERR|WRN)\]/.test(lines[i])) {
-      hitIndexes.push(i)
+const forEachLine = (content: string, onLine: (line: string, lineNo: number) => boolean | void) => {
+  let cursor = 0
+  let lineNo = 1
+  while (cursor <= content.length) {
+    const lf = content.indexOf('\n', cursor)
+    let raw: string
+    if (lf < 0) {
+      raw = content.slice(cursor)
+      cursor = content.length + 1
+    } else {
+      raw = content.slice(cursor, lf)
+      cursor = lf + 1
     }
+    if (raw.endsWith('\r')) {
+      raw = raw.slice(0, -1)
+    }
+    const shouldContinue = onLine(raw, lineNo)
+    if (shouldContinue === false) break
+    lineNo += 1
+    if (lf < 0) break
+  }
+}
+
+const collectSignalLines = (target: AiLoadedTarget, maxHits = 24, maxOutput = 60): SignalLineItem[] => {
+  // Avoid split(/\r?\n/) on very large logs: it creates massive transient strings.
+  const hitLines: number[] = []
+  forEachLine(target.content, (line, lineNo) => {
+    if (/\[(ERR|WRN)\]/.test(line)) {
+      hitLines.push(lineNo)
+      if (hitLines.length > maxHits) {
+        hitLines.shift()
+      }
+    }
+  })
+
+  if (hitLines.length === 0) return []
+
+  const neededLines = new Set<number>()
+  for (const lineNo of hitLines) {
+    if (lineNo > 1) neededLines.add(lineNo - 1)
+    neededLines.add(lineNo)
+    neededLines.add(lineNo + 1)
   }
 
-  if (hitIndexes.length === 0) return []
-
-  const chosen = hitIndexes.slice(-maxHits)
-  const expanded = new Set<number>()
-  for (const index of chosen) {
-    if (index > 0) expanded.add(index - 1)
-    expanded.add(index)
-    if (index + 1 < lines.length) expanded.add(index + 1)
-  }
-
-  const ordered = Array.from(expanded).sort((a, b) => a - b)
   const output: SignalLineItem[] = []
-  for (const index of ordered) {
+  forEachLine(target.content, (line, lineNo) => {
+    if (!neededLines.has(lineNo)) return
     output.push({
-      line: index + 1,
-      text: truncate(lines[index]),
+      line: lineNo,
+      text: truncate(line),
     })
-    if (output.length >= maxOutput) break
-  }
+    if (output.length >= maxOutput) {
+      return false
+    }
+  })
 
   return output
 }
