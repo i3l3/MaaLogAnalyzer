@@ -12,9 +12,7 @@ export interface AppSettings {
   defaultCollapseRecognition: boolean
   // 默认折叠识别中嵌套的识别节点
   defaultCollapseNestedRecognition: boolean
-  // 默认折叠根部动作列表
-  defaultCollapseAction: boolean
-  // 默认折叠嵌套动作节点（树形视图）
+  // 默认折叠嵌套动作节点（详细/树形）
   defaultCollapseNestedActionNodes: boolean
   // 默认展开原始 JSON 数据
   defaultExpandRawJson: boolean
@@ -40,7 +38,6 @@ const SETTINGS_KEY = 'maa-log-analyzer-settings'
 const defaultSettings: AppSettings = {
   defaultCollapseRecognition: false,
   defaultCollapseNestedRecognition: true,
-  defaultCollapseAction: true,
   defaultCollapseNestedActionNodes: true,
   defaultExpandRawJson: true,
   displayMode: 'tree',

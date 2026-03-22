@@ -66,11 +66,6 @@ const handleReset = () => {
           </tr>
 
           <tr v-if="settings.displayMode === 'detailed' || settings.displayMode === 'tree'">
-            <td>默认折叠根部动作列表</td>
-            <td><n-switch v-model:value="settings.defaultCollapseAction" /></td>
-          </tr>
-
-          <tr v-if="settings.displayMode === 'tree'">
             <td>默认折叠嵌套动作节点</td>
             <td><n-switch v-model:value="settings.defaultCollapseNestedActionNodes" /></td>
           </tr>

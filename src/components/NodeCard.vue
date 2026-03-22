@@ -34,13 +34,13 @@ const expandedAttempts = ref<Map<number, boolean>>(new Map())
 const recognitionExpanded = ref(!settings.defaultCollapseRecognition)
 
 // 跟踪 Action 部分是否展开
-const actionExpanded = ref(!settings.defaultCollapseAction)
+const actionExpanded = ref(!settings.defaultCollapseNestedActionNodes)
 
 // 监听node变化，清空展开状态
 watch(() => props.node?.node_id, () => {
   expandedAttempts.value.clear()
   recognitionExpanded.value = !settings.defaultCollapseRecognition
-  actionExpanded.value = !settings.defaultCollapseAction
+  actionExpanded.value = !settings.defaultCollapseNestedActionNodes
 }, { flush: 'sync' })
 
 // 设置变化时同步默认折叠状态（无需切换节点）
@@ -48,7 +48,7 @@ watch(() => settings.defaultCollapseRecognition, (val) => {
   recognitionExpanded.value = !val
 }, { flush: 'sync' })
 
-watch(() => settings.defaultCollapseAction, (val) => {
+watch(() => settings.defaultCollapseNestedActionNodes, (val) => {
   actionExpanded.value = !val
 }, { flush: 'sync' })
 
@@ -227,6 +227,8 @@ const actionButtonType = computed<ButtonType>(() => {
           :merged-recognition-list="mergedRecognitionList"
           :recognition-expanded="recognitionExpanded"
           :action-expanded="actionExpanded"
+          :default-collapse-nested-recognition="settings.defaultCollapseNestedRecognition"
+          :default-collapse-nested-action-nodes="settings.defaultCollapseNestedActionNodes"
           :is-expanded="isExpanded"
           :get-button-type="getButtonType"
           :action-button-type="actionButtonType"

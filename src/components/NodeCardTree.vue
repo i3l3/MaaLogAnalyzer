@@ -2,8 +2,10 @@
 import { computed, ref, watch } from 'vue'
 import { NButton, NFlex, NText } from 'naive-ui'
 import { CheckCircleOutlined, CloseCircleOutlined } from '@vicons/antd'
-import type { NodeInfo, MergedRecognitionItem, RecognitionAttempt, UnifiedFlowItem } from '../types'
+import type { NodeInfo, MergedRecognitionItem } from '../types'
 import { buildNodeActionFlowItems, buildNodeActionLevelRecognitionItems } from '../utils/nodeFlow'
+import { getFlowItemButtonType, getFlowItemShortLabel } from '../utils/flowLabels'
+import { flattenFlowItems, flattenNestedRecognitionNodes } from '../utils/flowTree'
 
 const props = defineProps<{
   node: NodeInfo
@@ -26,48 +28,9 @@ const emit = defineEmits<{
   'toggle-nested': [attemptIndex: number]
 }>()
 
-interface FlattenedFlowItem {
-  item: UnifiedFlowItem
-  depth: number
-  hasChildren: boolean
-  expanded: boolean
-}
+const TREE_INDENT_PX = 12
 
-interface FlattenedNestedRecognition {
-  attempt: RecognitionAttempt
-  flowItemId: string
-  depth: number
-  hasChildren: boolean
-  expanded: boolean
-}
-
-const flattenNestedRecognitionNodes = (
-  attempts: RecognitionAttempt[] | undefined,
-  parentFlowItemId: string,
-  isExpanded: (flowItemId: string) => boolean,
-  depth = 1
-): FlattenedNestedRecognition[] => {
-  if (!attempts || attempts.length === 0) return []
-
-  const result: FlattenedNestedRecognition[] = []
-  for (let i = 0; i < attempts.length; i++) {
-    const attempt = attempts[i]
-    const flowItemId = `${parentFlowItemId}.nested.${i}`
-    const hasChildren = !!(attempt.nested_nodes && attempt.nested_nodes.length > 0)
-    const expanded = hasChildren ? isExpanded(flowItemId) : false
-    result.push({
-      attempt,
-      flowItemId,
-      depth,
-      hasChildren,
-      expanded,
-    })
-    if (hasChildren && expanded) {
-      result.push(...flattenNestedRecognitionNodes(attempt.nested_nodes, flowItemId, isExpanded, depth + 1))
-    }
-  }
-  return result
-}
+const toTreeOffset = (depth: number): string => `${depth * TREE_INDENT_PX}px`
 
 const isRecognitionNestedExpanded = (attemptIndex: number): boolean => {
   if (props.isExpanded) return props.isExpanded(attemptIndex)
@@ -111,37 +74,14 @@ watch(() => props.defaultCollapseNestedActionNodes, resetFlowItemExpandState, { 
 watch(() => props.node.node_id, resetNestedRecognitionExpandState, { flush: 'sync' })
 watch(() => props.defaultCollapseNestedRecognition, resetNestedRecognitionExpandState, { flush: 'sync' })
 
-const flattenFlowItemsForTree = (
-  items: UnifiedFlowItem[] | undefined,
-  isExpanded: (flowItemId: string) => boolean,
-  depth = 0
-): FlattenedFlowItem[] => {
-  if (!items || items.length === 0) return []
-  const rows: FlattenedFlowItem[] = []
-  for (const item of items) {
-    const hasChildren = !!(item.children && item.children.length > 0)
-    const expanded = hasChildren ? isExpanded(item.id) : false
-    rows.push({ item, depth, hasChildren, expanded })
-    if (hasChildren && expanded) {
-      rows.push(...flattenFlowItemsForTree(item.children, isExpanded, depth + 1))
-    }
-  }
-  return rows
-}
-
 const actionLevelRecognitionItems = computed(() => buildNodeActionLevelRecognitionItems(props.node))
 const taskFlowItems = computed(() =>
   buildNodeActionFlowItems(props.node).filter(item => item.type !== 'recognition_node')
 )
-const flowRows = computed(() => flattenFlowItemsForTree(taskFlowItems.value, isFlowItemExpanded))
+const flowRows = computed(() => flattenFlowItems(taskFlowItems.value, isFlowItemExpanded))
 const isRecognitionExpanded = computed(() => props.recognitionExpanded ?? true)
 const isActionExpanded = computed(() => props.actionExpanded ?? true)
-
-const getFlowItemButtonType = (item: UnifiedFlowItem): 'success' | 'warning' | 'error' | 'info' => {
-  if (item.status === 'success') return 'success'
-  if (item.type === 'recognition' || item.type === 'recognition_node') return 'warning'
-  return 'error'
-}
+const hasActionNestedChildren = computed(() => actionLevelRecognitionItems.value.length > 0 || flowRows.value.length > 0)
 
 const getRecognitionButtonType = (status: MergedRecognitionItem['status']): 'success' | 'warning' | 'default' => {
   if (status === 'success') return 'success'
@@ -149,17 +89,7 @@ const getRecognitionButtonType = (status: MergedRecognitionItem['status']): 'suc
   return 'default'
 }
 
-const getFlowItemTypeLabel = (type: UnifiedFlowItem['type']) => {
-  switch (type) {
-    case 'task': return 'Task'
-    case 'pipeline_node': return 'Pipeline'
-    case 'recognition': return 'Rec'
-    case 'recognition_node': return 'RecNode'
-    case 'action': return 'Action'
-    case 'action_node': return 'ActNode'
-    default: return type
-  }
-}
+const recognitionNodeShortLabel = getFlowItemShortLabel('recognition_node')
 </script>
 
 <template>
@@ -182,32 +112,31 @@ const getFlowItemTypeLabel = (type: UnifiedFlowItem['type']) => {
         <n-text v-if="item.isRoundSeparator" depth="3" class="tree-round-separator-text">
           {{ item.name }}
         </n-text>
-        <n-button
-          v-else-if="item.status === 'not-recognized'"
-          text
-          size="tiny"
-          type="default"
-          disabled
-          style="opacity: 0.5"
-        >
-          {{ item.name }}
-        </n-button>
         <template v-else>
-          <n-flex
-            v-if="item.hasNestedNodes && item.attemptIndex != null"
-            align="center"
-            style="gap: 4px"
-          >
+          <n-flex align="center" style="gap: 4px">
             <span
+              v-if="item.hasNestedNodes && item.attemptIndex != null"
               class="tree-toggle"
               :class="{ 'tree-toggle-collapsed': !isRecognitionNestedExpanded(item.attemptIndex) }"
               @click.stop="emit('toggle-nested', item.attemptIndex)"
             />
+            <span v-else class="tree-toggle-placeholder" />
             <n-button
+              v-if="item.status === 'not-recognized'"
+              text
+              size="tiny"
+              type="default"
+              disabled
+              style="opacity: 0.5"
+            >
+              {{ item.name }}
+            </n-button>
+            <n-button
+              v-else
               text
               size="tiny"
               :type="getRecognitionButtonType(item.status)"
-              @click="emit('select-recognition', node, item.attemptIndex)"
+              @click="item.attemptIndex != null ? emit('select-recognition', node, item.attemptIndex) : undefined"
             >
               <template #icon>
                 <check-circle-outlined v-if="item.status === 'success'" />
@@ -216,19 +145,6 @@ const getFlowItemTypeLabel = (type: UnifiedFlowItem['type']) => {
               {{ item.name }}
             </n-button>
           </n-flex>
-          <n-button
-            v-else
-            text
-            size="tiny"
-            :type="getRecognitionButtonType(item.status)"
-            @click="item.attemptIndex != null ? emit('select-recognition', node, item.attemptIndex) : undefined"
-          >
-            <template #icon>
-              <check-circle-outlined v-if="item.status === 'success'" />
-              <close-circle-outlined v-else />
-            </template>
-            {{ item.name }}
-          </n-button>
 
           <ul
             v-if="item.hasNestedNodes && item.attemptIndex != null && isRecognitionNestedExpanded(item.attemptIndex) && item.attempt?.nested_nodes && item.attempt.nested_nodes.length > 0"
@@ -238,32 +154,32 @@ const getFlowItemTypeLabel = (type: UnifiedFlowItem['type']) => {
               v-for="nested in flattenNestedRecognitionNodes(item.attempt.nested_nodes, `node.recognition.${item.attemptIndex}`, isNestedRecognitionFlowItemExpanded)"
               :key="`tree-rec-nested-${item.attemptIndex}-${nested.flowItemId}`"
               class="tree-item"
+              :style="{ '--tree-item-offset': toTreeOffset(nested.depth) }"
             >
               <n-flex align="center" style="gap: 4px">
                 <span
                   v-if="nested.hasChildren"
                   class="tree-toggle"
                   :class="{ 'tree-toggle-collapsed': !nested.expanded }"
-                  :style="{ marginLeft: `${nested.depth * 12}px` }"
+                  :style="{ marginLeft: toTreeOffset(nested.depth) }"
                   @click.stop="toggleNestedRecognitionFlowItemExpand(nested.flowItemId)"
                 />
                 <span
                   v-else
                   class="tree-toggle-placeholder"
-                  :style="{ marginLeft: `${nested.depth * 12}px` }"
+                  :style="{ marginLeft: toTreeOffset(nested.depth) }"
                 />
                 <n-button
                   text
                   size="tiny"
                   :type="nested.attempt.status === 'success' ? 'success' : 'warning'"
-                  style="margin-left: 12px"
                   @click="emit('select-flow-item', node, nested.flowItemId)"
                 >
                   <template #icon>
                     <check-circle-outlined v-if="nested.attempt.status === 'success'" />
                     <close-circle-outlined v-else />
                   </template>
-                  [RecNode] {{ nested.attempt.name }}
+                  {{ recognitionNodeShortLabel }} · {{ nested.attempt.name }}
                 </n-button>
               </n-flex>
             </li>
@@ -274,81 +190,93 @@ const getFlowItemTypeLabel = (type: UnifiedFlowItem['type']) => {
 
     <div style="margin-top: 4px">
       <n-flex align="center" style="gap: 4px">
-        <span
-          class="tree-toggle"
-          :class="{ 'tree-toggle-collapsed': !isActionExpanded }"
-          @click="emit('toggle-action')"
-        />
-        <n-text depth="3" style="font-size: 12px; cursor: pointer" @click="emit('toggle-action')">Action</n-text>
-        <n-button
-          v-if="node.action_details"
-          text
-          size="tiny"
-          :type="node.action_details.success ? 'success' : 'error'"
-          @click="emit('select-action', node)"
-        >
-          <template #icon>
-            <check-circle-outlined v-if="node.action_details.success" />
-            <close-circle-outlined v-else />
-          </template>
-          {{ node.action_details.name }}
-        </n-button>
+        <span class="tree-toggle tree-toggle-hidden" />
+        <n-text depth="3" style="font-size: 12px;">Action</n-text>
       </n-flex>
     </div>
 
-    <ul v-if="isActionExpanded && (actionLevelRecognitionItems.length > 0 || flowRows.length > 0)" class="tree-list">
-      <li
-        v-for="(item, attemptIndex) in actionLevelRecognitionItems"
-        :key="`tree-action-reco-${attemptIndex}`"
-        class="tree-item"
-      >
-        <n-button
-          text
-          size="tiny"
-          :type="item.status === 'success' ? 'success' : 'warning'"
-          style="margin-left: 12px"
-          @click="emit('select-action-recognition', node, attemptIndex)"
-        >
-          <template #icon>
-            <check-circle-outlined v-if="item.status === 'success'" />
-            <close-circle-outlined v-else />
-          </template>
-          [RecNode] {{ item.name }}
-        </n-button>
-      </li>
-
-      <li
-        v-for="row in flowRows"
-        :key="`tree-row-${row.item.id}`"
-        class="tree-item"
-      >
+    <ul v-if="node.action_details" class="tree-list">
+      <li class="tree-item">
         <n-flex align="center" style="gap: 4px">
           <span
-            v-if="row.hasChildren"
+            v-if="hasActionNestedChildren"
             class="tree-toggle"
-            :class="{ 'tree-toggle-collapsed': !row.expanded }"
-            :style="{ marginLeft: `${row.depth * 12}px` }"
-            @click.stop="toggleFlowItemExpand(row.item.id)"
+            :class="{ 'tree-toggle-collapsed': !isActionExpanded }"
+            @click="emit('toggle-action')"
           />
-          <span
-            v-else
-            class="tree-toggle-placeholder"
-            :style="{ marginLeft: `${row.depth * 12}px` }"
-          />
+          <span v-else class="tree-toggle-placeholder" />
           <n-button
             text
             size="tiny"
-            :type="getFlowItemButtonType(row.item)"
-            style="margin-left: 12px"
-            @click="emit('select-flow-item', node, row.item.id)"
+            :type="node.action_details.success ? 'success' : 'error'"
+            @click="emit('select-action', node)"
           >
             <template #icon>
-              <check-circle-outlined v-if="row.item.status === 'success'" />
+              <check-circle-outlined v-if="node.action_details.success" />
               <close-circle-outlined v-else />
             </template>
-            [{{ getFlowItemTypeLabel(row.item.type) }}] {{ row.item.name }}
+            {{ node.action_details.name }}
           </n-button>
         </n-flex>
+
+        <ul v-if="isActionExpanded && hasActionNestedChildren" class="tree-list">
+          <li
+            v-for="(item, attemptIndex) in actionLevelRecognitionItems"
+            :key="`tree-action-reco-${attemptIndex}`"
+            class="tree-item"
+            style="--tree-item-offset: 0px"
+          >
+            <n-flex align="center" style="gap: 4px">
+              <span class="tree-toggle-placeholder" style="margin-left: 0px" />
+              <n-button
+                text
+                size="tiny"
+                :type="item.status === 'success' ? 'success' : 'warning'"
+                @click="emit('select-action-recognition', node, attemptIndex)"
+              >
+                <template #icon>
+                  <check-circle-outlined v-if="item.status === 'success'" />
+                  <close-circle-outlined v-else />
+                </template>
+                {{ recognitionNodeShortLabel }} · {{ item.name }}
+              </n-button>
+            </n-flex>
+          </li>
+
+          <li
+            v-for="row in flowRows"
+            :key="`tree-row-${row.item.id}`"
+            class="tree-item"
+            :style="{ '--tree-item-offset': toTreeOffset(row.depth) }"
+          >
+            <n-flex align="center" style="gap: 4px">
+              <span
+                v-if="row.hasChildren"
+                class="tree-toggle"
+                :class="{ 'tree-toggle-collapsed': !row.expanded }"
+                :style="{ marginLeft: toTreeOffset(row.depth) }"
+                @click.stop="toggleFlowItemExpand(row.item.id)"
+              />
+              <span
+                v-else
+                class="tree-toggle-placeholder"
+                :style="{ marginLeft: toTreeOffset(row.depth) }"
+              />
+              <n-button
+                text
+                size="tiny"
+                :type="getFlowItemButtonType(row.item)"
+                @click="emit('select-flow-item', node, row.item.id)"
+              >
+                <template #icon>
+                  <check-circle-outlined v-if="row.item.status === 'success'" />
+                  <close-circle-outlined v-else />
+                </template>
+                {{ getFlowItemShortLabel(row.item.type) }} · {{ row.item.name }}
+              </n-button>
+            </n-flex>
+          </li>
+        </ul>
       </li>
     </ul>
   </div>
@@ -374,6 +302,11 @@ const getFlowItemTypeLabel = (type: UnifiedFlowItem['type']) => {
 
 .tree-toggle-collapsed {
   transform: rotate(0deg);
+}
+
+.tree-toggle-hidden {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .tree-toggle-placeholder {
@@ -410,17 +343,8 @@ const getFlowItemTypeLabel = (type: UnifiedFlowItem['type']) => {
   position: absolute;
   left: -12px;
   top: 12px;
-  width: 12px;
+  width: calc(12px + var(--tree-item-offset, 0px));
   border-bottom: 1px solid var(--n-border-color, rgba(255, 255, 255, 0.12));
-}
-
-.tree-item-round-separator {
-  padding-top: 6px;
-  padding-bottom: 4px;
-}
-
-.tree-item-round-separator::before {
-  border-bottom: none;
 }
 
 .tree-round-separator-text {
