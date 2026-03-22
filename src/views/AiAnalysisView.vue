@@ -341,7 +341,7 @@ watch(apiKey, (value) => {
 })
 
 watch(
-  () => settings.includeSelectedNodeFocus,
+  () => [settings.includeSelectedNodeFocus, settings.knowledgeBootstrap],
   () => {
     saveAiSettings(settings)
   }
@@ -1310,7 +1310,7 @@ const buildFullContextPrompt = (compact: boolean, minifiedJson = false, focusMod
     loadedTargets: props.loadedTargets,
     loadedDefaultTargetId: props.loadedDefaultTargetId,
     includeKnowledgePack: settings.includeKnowledgePack,
-    includeKnowledgeBootstrap: true,
+    includeKnowledgeBootstrap: settings.knowledgeBootstrap,
     includeSignalLines: settings.includeSignalLines,
   })
   const context = compact ? buildCompactContext(rawContext) : rawContext
@@ -1321,7 +1321,7 @@ const buildFullContextPrompt = (compact: boolean, minifiedJson = false, focusMod
   return [
     compact
       ? '这是首轮或上下文变化后的分析。由于上下文较大，本轮启用压缩上下文；结论仍必须绑定明确字段证据。'
-      : '这是首轮或上下文变化后的分析，必须先盘点证据再给结论。若开启知识包，本轮包含全量知识卡片。',
+      : `这是首轮或上下文变化后的分析，必须先盘点证据再给结论。若开启知识包，本轮采用${settings.knowledgeBootstrap ? '全量知识卡片（按相关性排序）' : '相关知识摘要'}。`,
     `用户问题: ${question.value}`,
     '',
     '任务要求:',
@@ -2020,7 +2020,7 @@ const handleAnalyze = async () => {
                   最大输出：{{ settings.maxTokens }} · 自动截断重试（提额）：{{ settings.maxTokensAuto ? '开' : '关' }}
                 </n-text>
                 <n-text depth="3" style="font-size: 12px">
-                  知识包：{{ settings.includeKnowledgePack ? '开' : '关' }} · 信号线：{{ settings.includeSignalLines ? '开' : '关' }} · 节点焦点：{{ settings.includeSelectedNodeFocus ? '开' : '关' }} · 流式：{{ settings.streamResponse ? '开' : '关' }}
+                  知识包：{{ settings.includeKnowledgePack ? '开' : '关' }} · 知识模式：{{ settings.knowledgeBootstrap ? '全量排序' : '相关摘要' }} · 信号线：{{ settings.includeSignalLines ? '开' : '关' }} · 节点焦点：{{ settings.includeSelectedNodeFocus ? '开' : '关' }} · 流式：{{ settings.streamResponse ? '开' : '关' }}
                 </n-text>
                 <n-text depth="3" style="font-size: 12px">
                   截断精简重试：{{ settings.truncateAutoRetryEnabled ? '开' : '关' }} · 精简上限：{{ settings.conciseAnswerMaxChars }} 字
@@ -2031,6 +2031,7 @@ const handleAnalyze = async () => {
 
           <n-checkbox v-model:checked="memoryModeEnabled">启用上下文记忆模式（追问时不重复发送全量 JSON）</n-checkbox>
           <n-checkbox v-model:checked="settings.includeSelectedNodeFocus">注入选中节点焦点上下文</n-checkbox>
+          <n-checkbox v-model:checked="settings.knowledgeBootstrap">首轮注入全量知识卡片（关闭时仅注入相关摘要）</n-checkbox>
 
           <n-flex align="center" style="gap: 8px; flex-wrap: wrap">
             <n-tag :type="memoryApplicable ? 'success' : 'default'">{{ memoryStatusText }}</n-tag>

@@ -1864,7 +1864,7 @@ const buildNestedActionDiagnostics = (
   }
 }
 
-const collectFailureNodes = (task: TaskInfo | null, limit = 24) => {
+const collectFailureNodes = (task: TaskInfo | null, limit = 0) => {
   if (!task) return []
 
   const rows: Array<Record<string, unknown>> = []
@@ -1883,6 +1883,7 @@ const collectFailureNodes = (task: TaskInfo | null, limit = 24) => {
     rows.push({
       node_id: node.node_id,
       node: node.name,
+      ts: node.ts,
       status: node.status,
       reason,
       reco: lastReco ? { name: lastReco.name, reco_id: lastReco.reco_id, status: lastReco.status } : null,
@@ -1893,7 +1894,7 @@ const collectFailureNodes = (task: TaskInfo | null, limit = 24) => {
       })),
     })
 
-    if (rows.length >= limit) break
+    if (limit > 0 && rows.length >= limit) break
   }
 
   return rows
@@ -1958,33 +1959,310 @@ const collectSignalLines = (target: AiLoadedTarget, maxHits = 24, maxOutput = 60
   return output
 }
 
-const buildKnowledgeBootstrap = () => {
-  return maaKnowledgePack.cards.map(card => ({
+const normalizeKnowledgeToken = (value: unknown): string => {
+  if (typeof value !== 'string') return ''
+  return value.trim().replace(/\s+/g, ' ')
+}
+
+const pushKnowledgeToken = (
+  token: unknown,
+  output: string[],
+  seen: Set<string>,
+  maxCount = 64
+) => {
+  if (output.length >= maxCount) return
+  const normalized = normalizeKnowledgeToken(token)
+  if (!normalized) return
+  const key = normalized.toLowerCase()
+  if (seen.has(key)) return
+  seen.add(key)
+  output.push(normalized)
+}
+
+const buildKnowledgeTokens = (question: string, task: TaskInfo | null): string[] => {
+  const tokens: string[] = []
+  const seen = new Set<string>()
+
+  pushKnowledgeToken(question, tokens, seen)
+
+  if (!task) return tokens
+
+  pushKnowledgeToken(task.entry, tokens, seen)
+
+  const recentEvents = task.events.slice(-160)
+  for (const event of recentEvents) {
+    if (
+      event.message.includes('Failed')
+      || event.message.includes('on_error')
+      || event.message.includes('Jump')
+      || event.message.includes('Stop')
+    ) {
+      pushKnowledgeToken(event.message, tokens, seen)
+      pushKnowledgeToken(event.details?.name as string | undefined, tokens, seen)
+      pushKnowledgeToken(event.details?.entry as string | undefined, tokens, seen)
+      pushKnowledgeToken(event.details?.action as string | undefined, tokens, seen)
+    }
+    if (tokens.length >= 64) break
+  }
+
+  if (task) {
+    for (const node of task.nodes) {
+      if (node.status === 'failed') {
+        pushKnowledgeToken(node.name, tokens, seen)
+        pushKnowledgeToken(node.action_details?.name, tokens, seen)
+        pushKnowledgeToken(node.action_details?.action, tokens, seen)
+        for (const nextItem of node.next_list) {
+          if (nextItem.jump_back || nextItem.anchor) {
+            pushKnowledgeToken(nextItem.name, tokens, seen)
+          }
+        }
+      }
+      for (const attempt of buildNodeRecognitionAttempts(node)) {
+        if (attempt.status === 'failed') {
+          pushKnowledgeToken(attempt.name, tokens, seen)
+          pushKnowledgeToken(attempt.reco_details?.algorithm, tokens, seen)
+        }
+      }
+      if (tokens.length >= 64) break
+    }
+  }
+
+  return tokens
+}
+
+const buildRelatedMatchTerms = (knowledgeTokens: string[]): string[] => {
+  const terms: string[] = []
+  const seen = new Set<string>()
+
+  const push = (value: unknown) => {
+    if (terms.length >= 64) return
+    const normalized = normalizeKnowledgeToken(value).toLowerCase()
+    if (!normalized || normalized.length < 2) return
+    if (seen.has(normalized)) return
+    seen.add(normalized)
+    terms.push(normalized)
+  }
+
+  for (const token of knowledgeTokens) {
+    push(token)
+    for (const piece of token.split(/[^A-Za-z0-9_\u4e00-\u9fff.-]+/).filter(Boolean)) {
+      push(piece)
+    }
+  }
+
+  return terms
+}
+
+const scoreTextByTerms = (
+  text: string,
+  terms: string[],
+  exactWeight = 8,
+  includeWeight = 3,
+  scoreCap = 120
+): number => {
+  if (!text || terms.length === 0) return 0
+  const normalized = text.toLowerCase()
+  let score = 0
+  for (const term of terms) {
+    if (!term) continue
+    if (normalized === term) {
+      score += exactWeight
+      continue
+    }
+    if (normalized.includes(term)) {
+      score += includeWeight
+    }
+    if (score >= scoreCap) return scoreCap
+  }
+  return score
+}
+
+const selectRelevantTimelineItems = (
+  timeline: TimelineNodeItem[],
+  terms: string[],
+  selectedNode: NodeInfo | null | undefined,
+  maxItems = 140
+): TimelineNodeItem[] => {
+  if (timeline.length === 0) return []
+  const total = timeline.length
+  const selectedNodeName = selectedNode?.name ?? ''
+  const selectedNodeId = selectedNode?.node_id ?? -1
+
+  const ranked = timeline.map((item, index) => {
+    const matchText = [
+      item.name,
+      item.action,
+      item.actionName,
+      ...item.recognition.map(rec => rec.name),
+      ...item.next_list.map(next => next.name),
+      ...item.nestedActionTopNames.map(n => n.name),
+      ...item.nestedRecognitionTopNames.map(n => n.name),
+    ].join(' ')
+
+    let score = 0
+    score += scoreTextByTerms(matchText, terms, 14, 5, 140)
+    if (item.status === 'failed') score += 48
+    if (item.recognition.some(rec => rec.status === 'failed')) score += 24
+    if (selectedNodeId > 0 && item.node_id === selectedNodeId) score += 120
+    else if (selectedNodeName && item.name === selectedNodeName) score += 34
+    score += Math.floor((index / Math.max(1, total)) * 26)
+    return { index, score }
+  })
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      return b.index - a.index
+    })
+
+  const limit = Math.min(maxItems, timeline.length)
+  const selectedIndexes = new Set<number>(ranked.slice(0, limit).map(item => item.index))
+  for (let i = Math.max(0, timeline.length - 8); i < timeline.length; i += 1) {
+    if (selectedIndexes.size >= limit) break
+    selectedIndexes.add(i)
+  }
+
+  return Array.from(selectedIndexes)
+    .sort((a, b) => a - b)
+    .map(index => timeline[index])
+}
+
+const selectRelevantEvents = (
+  events: EventNotification[],
+  terms: string[],
+  selectedNode: NodeInfo | null | undefined,
+  maxItems = 220
+): Array<ReturnType<typeof summarizeEvent>> => {
+  if (events.length === 0) return []
+  const pool = events.slice(-1500)
+  const total = pool.length
+  const selectedNodeName = selectedNode?.name ?? ''
+
+  const ranked = pool.map((event, index) => {
+    const details = event.details ?? {}
+    const detailName = typeof details.name === 'string' ? details.name : ''
+    const text = [
+      event.message,
+      detailName,
+      typeof details.entry === 'string' ? details.entry : '',
+      typeof details.action === 'string' ? details.action : '',
+      typeof details.reason === 'string' ? details.reason : '',
+      typeof details.error === 'string' ? details.error : '',
+    ].join(' ')
+
+    let score = 0
+    score += scoreTextByTerms(text, terms, 12, 4, 120)
+    if (event.message.includes('Failed')) score += 44
+    if (event.level === 'ERR') score += 38
+    if (event.level === 'WRN') score += 26
+    if (selectedNodeName && detailName === selectedNodeName) score += 46
+    score += Math.floor((index / Math.max(1, total)) * 22)
+    return { index, score }
+  })
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      return b.index - a.index
+    })
+
+  const limit = Math.min(maxItems, pool.length)
+  const selectedIndexes = new Set<number>(ranked.slice(0, limit).map(item => item.index))
+  for (let i = Math.max(0, pool.length - 12); i < pool.length; i += 1) {
+    if (selectedIndexes.size >= limit) break
+    selectedIndexes.add(i)
+  }
+
+  return Array.from(selectedIndexes)
+    .sort((a, b) => a - b)
+    .map(index => summarizeEvent(pool[index]))
+}
+
+const selectRelevantFailureRows = (
+  rows: Array<Record<string, unknown>>,
+  terms: string[],
+  selectedNode: NodeInfo | null | undefined,
+  maxItems = 96
+): Array<Record<string, unknown>> => {
+  if (rows.length === 0) return []
+  const selectedNodeName = selectedNode?.name ?? ''
+
+  return rows
+    .map((row, index) => {
+      const nodeName = typeof row.node === 'string' ? row.node : ''
+      const reason = typeof row.reason === 'string' ? row.reason : ''
+      const recoName = typeof (row.reco as Record<string, unknown> | null)?.name === 'string'
+        ? String((row.reco as Record<string, unknown>).name)
+        : ''
+      const text = [nodeName, reason, recoName].join(' ')
+
+      let score = 0
+      score += scoreTextByTerms(text, terms, 14, 5, 120)
+      if (reason === 'node_failed') score += 40
+      else if (reason === 'recognition_failed') score += 22
+      if (selectedNodeName && nodeName === selectedNodeName) score += 52
+      score += Math.floor((index / Math.max(1, rows.length)) * 14)
+      return { row, score, index }
+    })
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      return b.index - a.index
+    })
+    .slice(0, Math.min(maxItems, rows.length))
+    .map(item => item.row)
+}
+
+const selectRelevantSignalLines = (
+  lines: SignalLineItem[],
+  terms: string[],
+  maxItems = 220
+): SignalLineItem[] => {
+  if (lines.length === 0) return []
+  const total = lines.length
+
+  return lines
+    .map((item, index) => {
+      let score = scoreTextByTerms(item.text, terms, 12, 4, 120)
+      if (/\[(ERR|WRN)\]/.test(item.text)) score += 18
+      if (/Failed|failed|timeout|on_error|jump_back/.test(item.text)) score += 12
+      score += Math.floor((index / Math.max(1, total)) * 8)
+      return { item, score, index }
+    })
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      return b.index - a.index
+    })
+    .slice(0, Math.min(maxItems, lines.length))
+    .sort((a, b) => a.index - b.index)
+    .map(entry => entry.item)
+}
+
+const buildKnowledgeDigest = (knowledgeTokens: string[]) => {
+  const tokens = knowledgeTokens.slice(0, 48)
+  const query = tokens.join(' ')
+  return searchKnowledge(query, 12).map(card => ({
     id: card.id,
     topic: card.topic,
     title: card.title,
     rule: card.rule,
+    keywords: card.keywords.slice(0, 8),
+    details: card.details.slice(0, 2),
+    evidence: card.evidence.slice(0, 3),
   }))
 }
 
-const buildKnowledgeDigest = (question: string, task: TaskInfo | null) => {
-  const tokens = [question]
-  if (task) {
-    tokens.push(task.entry)
-    for (const node of task.nodes) {
-      if (node.status === 'failed') tokens.push(node.name)
-      for (const attempt of buildNodeRecognitionAttempts(node)) {
-        if (attempt.status === 'failed') tokens.push(attempt.name)
-      }
-      if (tokens.length > 30) break
-    }
-  }
+const buildKnowledgeBootstrap = (knowledgeTokens: string[]) => {
+  const query = knowledgeTokens.slice(0, 48).join(' ')
+  const ranked = query ? searchKnowledge(query, maaKnowledgePack.cards.length) : []
+  const rankedIds = new Set(ranked.map(card => card.id))
+  const ordered = [
+    ...ranked,
+    ...maaKnowledgePack.cards.filter(card => !rankedIds.has(card.id)),
+  ]
 
-  const query = tokens.join(' ')
-  return searchKnowledge(query, 8).map(card => ({
+  return ordered.map(card => ({
     id: card.id,
+    topic: card.topic,
     title: card.title,
     rule: card.rule,
+    keywords: card.keywords.slice(0, 6),
+    evidence: card.evidence.slice(0, 2),
   }))
 }
 
@@ -2187,6 +2465,70 @@ const buildTimelineDiagnostics = (timeline: TimelineNodeItem[]) => {
     repeatedRuns: repeatedRuns.slice(0, 12),
     hotspotRecoPairs: hotspotRecoPairs.slice(0, 20),
     recoIdToName,
+  }
+}
+
+const buildFocusedSummary = (
+  timeline: TimelineNodeItem[],
+  failureRows: Array<Record<string, unknown>>,
+  signalLines: SignalLineItem[],
+  terms: string[]
+) => {
+  const failedNodes = timeline.filter(item => item.status === 'failed')
+  const failedRecoCount = timeline.reduce(
+    (sum, item) => sum + item.recognition.filter(rec => rec.status === 'failed').length,
+    0
+  )
+  const jumpBackCount = timeline.reduce(
+    (sum, item) => sum + item.next_list.filter(next => next.jump_back).length,
+    0
+  )
+
+  const reasonStats = new Map<string, number>()
+  for (const row of failureRows) {
+    const reason = typeof row.reason === 'string' ? row.reason : 'unknown'
+    reasonStats.set(reason, (reasonStats.get(reason) ?? 0) + 1)
+  }
+
+  const topFailedNodes = timeline
+    .filter(item => item.status === 'failed')
+    .reduce((map, item) => {
+      map.set(item.name, (map.get(item.name) ?? 0) + 1)
+      return map
+    }, new Map<string, number>())
+
+  const topFailedReco = timeline
+    .flatMap(item => item.recognition.filter(rec => rec.status === 'failed'))
+    .reduce((map, rec) => {
+      map.set(rec.name, (map.get(rec.name) ?? 0) + 1)
+      return map
+    }, new Map<string, number>())
+
+  const matchedSignalCount = signalLines.filter(item =>
+    terms.some(term => term.length >= 2 && item.text.toLowerCase().includes(term))
+  ).length
+
+  return {
+    timelineCount: timeline.length,
+    failedNodeCount: failedNodes.length,
+    failedRecoCount,
+    jumpBackCandidateCount: jumpBackCount,
+    failureCandidateCount: failureRows.length,
+    signalLineCount: signalLines.length,
+    signalLineMatchedByTerms: matchedSignalCount,
+    topFailureReasons: Array.from(reasonStats.entries())
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 4),
+    topFailedNodes: Array.from(topFailedNodes.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6),
+    topFailedRecognition: Array.from(topFailedReco.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6),
+    matchTerms: terms.slice(0, 16),
   }
 }
 
@@ -2666,16 +3008,33 @@ export function buildAiAnalysisContext(input: BuildAiContextInput): Record<strin
     }))
     : []
 
+  const knowledgeTokens = buildKnowledgeTokens(input.question, selectedTask)
+  const relatedMatchTerms = buildRelatedMatchTerms(knowledgeTokens)
+
+  const selectedNodeTimelineFull = selectRelevantTimelineItems(
+    fullTaskTimeline,
+    relatedMatchTerms,
+    input.selectedNode,
+    140
+  )
   const selectedEventTailFull = selectedTask
-    ? selectedTask.events.slice(-140).map(summarizeEvent)
+    ? selectRelevantEvents(selectedTask.events, relatedMatchTerms, input.selectedNode, 180)
     : []
 
-  const failureCandidatesFull = collectFailureNodes(selectedTask, 96)
+  const failureRowsFull = collectFailureNodes(selectedTask, 0)
+  const failureCandidatesFull = selectRelevantFailureRows(
+    failureRowsFull,
+    relatedMatchTerms,
+    input.selectedNode,
+    96
+  )
 
   const bestTarget = input.includeSignalLines ? pickBestTarget(input.loadedTargets ?? [], input.loadedDefaultTargetId) : null
-  const signalLineItemsFull = bestTarget ? collectSignalLines(bestTarget, 96, 220) : []
+  const rawSignalLineItems = bestTarget ? collectSignalLines(bestTarget, 96, 260) : []
+  const signalLineItemsFull = selectRelevantSignalLines(rawSignalLineItems, relatedMatchTerms, 220)
 
   const timelineDiagnostics = buildTimelineDiagnostics(fullTaskTimeline)
+  const focusedTimelineDiagnostics = buildTimelineDiagnostics(selectedNodeTimelineFull)
   const signalDiagnostics = bestTarget
     ? buildSignalDiagnostics(signalLineItemsFull, timelineDiagnostics.recoIdToName, timelineDiagnostics.recoFailuresByNameAll)
     : null
@@ -2687,23 +3046,31 @@ export function buildAiAnalysisContext(input: BuildAiContextInput): Record<strin
   const nestedActionDiagnostics = buildNestedActionDiagnostics(selectedTask, jumpBackFlowDiagnostics)
   const questionNodeDiagnostics = buildQuestionNodeDiagnostics(input.question, selectedTask, jumpBackFlowDiagnostics)
   const pipelineFailedCount = fullTaskTimeline.filter(item => item.status === 'failed').length
+  const pipelineFailedCountFocused = selectedNodeTimelineFull.filter(item => item.status === 'failed').length
   const jumpBackHotNodes = timelineDiagnostics.longStayNodes
     .filter(item => (item.avgJumpBackBranches ?? 0) > 0)
     .map(item => item.node)
+  const jumpBackHotNodesFocused = focusedTimelineDiagnostics.longStayNodes
+    .filter(item => (item.avgJumpBackBranches ?? 0) > 0)
+    .map(item => item.node)
+  const useFocusedDeterministic = selectedNodeTimelineFull.length >= Math.min(28, Math.max(12, Math.floor(fullTaskTimeline.length * 0.3)))
+  const deterministicTimelineSource = useFocusedDeterministic ? focusedTimelineDiagnostics : timelineDiagnostics
+  const deterministicPipelineFailedCount = useFocusedDeterministic ? pipelineFailedCountFocused : pipelineFailedCount
+  const deterministicJumpBackHotNodes = useFocusedDeterministic ? jumpBackHotNodesFocused : jumpBackHotNodes
 
   const deterministicFindings = buildDeterministicFindings(
     {
-      longStayNodes: timelineDiagnostics.longStayNodes,
-      repeatedRuns: timelineDiagnostics.repeatedRuns,
-      hotspotRecoPairs: timelineDiagnostics.hotspotRecoPairs,
+      longStayNodes: deterministicTimelineSource.longStayNodes,
+      repeatedRuns: deterministicTimelineSource.repeatedRuns,
+      hotspotRecoPairs: deterministicTimelineSource.hotspotRecoPairs,
     },
     signalDiagnostics,
     {
       taskStatus: selectedTask?.status ?? null,
-      pipelineFailedCount,
+      pipelineFailedCount: deterministicPipelineFailedCount,
       actionFailureCount: eventChainDiagnostics.messageCounts.actionFailed,
       actionFailureOnErrorChainCount: eventChainDiagnostics.onErrorChains.filter(item => item.triggerType === 'action_failed').length,
-      jumpBackHotNodes,
+      jumpBackHotNodes: deterministicJumpBackHotNodes,
       stopTerminationDiagnostics,
       nextCandidateAvailabilityDiagnostics,
       anchorResolutionDiagnostics,
@@ -2715,19 +3082,43 @@ export function buildAiAnalysisContext(input: BuildAiContextInput): Record<strin
   const knowledgeFull = !input.includeKnowledgePack
     ? []
     : input.includeKnowledgeBootstrap
-      ? buildKnowledgeBootstrap()
-      : buildKnowledgeDigest(input.question, selectedTask)
+      ? buildKnowledgeBootstrap(knowledgeTokens)
+      : buildKnowledgeDigest(knowledgeTokens)
+  const relatedExtraction = {
+    matchTerms: relatedMatchTerms.slice(0, 24),
+    timelineScope: fullTaskTimeline.length,
+    timelinePicked: selectedNodeTimelineFull.length,
+    eventScope: selectedTask?.events.length ?? 0,
+    eventPicked: selectedEventTailFull.length,
+    failureScope: failureRowsFull.length,
+    failurePicked: failureCandidatesFull.length,
+    signalScope: rawSignalLineItems.length,
+    signalPicked: signalLineItemsFull.length,
+    deterministicScope: useFocusedDeterministic ? 'focused' : 'global',
+  }
+  const questionFocusedSummary = buildFocusedSummary(
+    selectedNodeTimelineFull,
+    failureCandidatesFull,
+    signalLineItemsFull,
+    relatedMatchTerms
+  )
+  const knowledgeMeta = {
+    enabled: input.includeKnowledgePack,
+    mode: input.includeKnowledgeBootstrap ? 'bootstrap' : 'digest',
+    queryTokens: knowledgeTokens.slice(0, 24),
+    totalMatched: knowledgeFull.length,
+  }
 
   const contextTargetChars = 52000
   const slicePlan = {
-    nodeLimit: Math.min(fullTaskTimeline.length, 96),
+    nodeLimit: Math.min(selectedNodeTimelineFull.length, 96),
     eventLimit: Math.min(selectedEventTailFull.length, 52),
     failureLimit: Math.min(failureCandidatesFull.length, 32),
     signalLimit: Math.min(signalLineItemsFull.length, 70),
     knowledgeLimit: Math.min(knowledgeFull.length, 18),
   }
   const sliceMin = {
-    nodeLimit: Math.min(fullTaskTimeline.length, 18),
+    nodeLimit: Math.min(selectedNodeTimelineFull.length, 18),
     eventLimit: Math.min(selectedEventTailFull.length, 10),
     failureLimit: Math.min(failureCandidatesFull.length, 8),
     signalLimit: Math.min(signalLineItemsFull.length, 18),
@@ -2735,8 +3126,8 @@ export function buildAiAnalysisContext(input: BuildAiContextInput): Record<strin
   }
 
   const applySlicePlan = () => ({
-    selectedNodeTimeline: fullTaskTimeline.slice(-slicePlan.nodeLimit),
-    selectedEventTail: selectedEventTailFull.slice(-slicePlan.eventLimit),
+    selectedNodeTimeline: selectedNodeTimelineFull.slice(0, slicePlan.nodeLimit),
+    selectedEventTail: selectedEventTailFull.slice(0, slicePlan.eventLimit),
     failureCandidates: failureCandidatesFull.slice(0, slicePlan.failureLimit),
     signalLines: bestTarget
       ? {
@@ -2777,6 +3168,9 @@ export function buildAiAnalysisContext(input: BuildAiContextInput): Record<strin
       nestedActionDiagnostics,
       questionNodeDiagnostics,
       deterministicFindings,
+      questionFocusedSummary,
+      relatedExtraction,
+      knowledgeMeta,
       knowledge: sliced.knowledge,
     }).length
   }
@@ -2844,6 +3238,9 @@ export function buildAiAnalysisContext(input: BuildAiContextInput): Record<strin
     nestedActionDiagnostics,
     questionNodeDiagnostics,
     deterministicFindings,
+    questionFocusedSummary,
+    relatedExtraction,
+    knowledgeMeta,
     knowledge: sliced.knowledge,
     contextBudget: {
       targetChars: contextTargetChars,

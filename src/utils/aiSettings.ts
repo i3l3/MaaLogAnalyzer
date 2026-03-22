@@ -8,6 +8,7 @@ export interface AiSettings {
   maxTokensAuto: boolean
   streamResponse: boolean
   includeKnowledgePack: boolean
+  knowledgeBootstrap: boolean
   includeSignalLines: boolean
   includeSelectedNodeFocus: boolean
   truncateAutoRetryEnabled: boolean
@@ -28,6 +29,7 @@ const defaultAiSettings: AiSettings = {
   maxTokensAuto: true,
   streamResponse: true,
   includeKnowledgePack: true,
+  knowledgeBootstrap: true,
   includeSignalLines: true,
   includeSelectedNodeFocus: true,
   truncateAutoRetryEnabled: true,
