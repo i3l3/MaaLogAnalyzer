@@ -20,10 +20,6 @@ const emit = defineEmits<{
   'select-node': [node: NodeInfo]
   'select-action': [node: NodeInfo]
   'select-recognition': [node: NodeInfo, attemptIndex: number]
-  'select-nested': [node: NodeInfo, attemptIndex: number, nestedIndex: number]
-  'select-nested-action': [node: NodeInfo, actionIndex: number, nestedIndex: number]
-  'select-action-recognition': [node: NodeInfo, attemptIndex: number]
-  'select-nested-action-recognition': [node: NodeInfo, actionIndex: number, nestedIndex: number, attemptIndex: number]
   'select-flow-item': [node: NodeInfo, flowItemId: string]
 }>()
 
@@ -232,13 +228,8 @@ const actionButtonType = computed<ButtonType>(() => {
           :is-expanded="isExpanded"
           :get-button-type="getButtonType"
           :action-button-type="actionButtonType"
-          @select-node="emit('select-node', $event)"
           @select-action="emit('select-action', $event)"
           @select-recognition="(n, i) => emit('select-recognition', n, i)"
-          @select-nested="(n, ai, ni) => emit('select-nested', n, ai, ni)"
-          @select-nested-action="(n, ai, ni) => emit('select-nested-action', n, ai, ni)"
-          @select-action-recognition="(n, i) => emit('select-action-recognition', n, i)"
-          @select-nested-action-recognition="(n, ai, ni, i) => emit('select-nested-action-recognition', n, ai, ni, i)"
           @select-flow-item="(n, id) => emit('select-flow-item', n, id)"
           @toggle-recognition="recognitionExpanded = !recognitionExpanded"
           @toggle-action="actionExpanded = !actionExpanded"
@@ -248,13 +239,8 @@ const actionButtonType = computed<ButtonType>(() => {
           v-else-if="settings.displayMode === 'compact'"
           :node="node"
           :merged-recognition-list="mergedRecognitionList"
-          @select-node="emit('select-node', $event)"
           @select-action="emit('select-action', $event)"
           @select-recognition="(n, i) => emit('select-recognition', n, i)"
-          @select-nested="(n, ai, ni) => emit('select-nested', n, ai, ni)"
-          @select-nested-action="(n, ai, ni) => emit('select-nested-action', n, ai, ni)"
-          @select-action-recognition="(n, i) => emit('select-action-recognition', n, i)"
-          @select-nested-action-recognition="(n, ai, ni, i) => emit('select-nested-action-recognition', n, ai, ni, i)"
           @select-flow-item="(n, id) => emit('select-flow-item', n, id)"
         />
         <node-card-tree
@@ -266,10 +252,8 @@ const actionButtonType = computed<ButtonType>(() => {
           :default-collapse-nested-recognition="settings.defaultCollapseNestedRecognition"
           :default-collapse-nested-action-nodes="settings.defaultCollapseNestedActionNodes"
           :is-expanded="isExpanded"
-          @select-node="emit('select-node', $event)"
           @select-action="emit('select-action', $event)"
           @select-recognition="(n, i) => emit('select-recognition', n, i)"
-          @select-action-recognition="(n, i) => emit('select-action-recognition', n, i)"
           @select-flow-item="(n, id) => emit('select-flow-item', n, id)"
           @toggle-recognition="recognitionExpanded = !recognitionExpanded"
           @toggle-action="actionExpanded = !actionExpanded"

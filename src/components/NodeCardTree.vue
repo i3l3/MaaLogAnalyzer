@@ -18,10 +18,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'select-node': [node: NodeInfo]
   'select-action': [node: NodeInfo]
   'select-recognition': [node: NodeInfo, attemptIndex: number]
-  'select-action-recognition': [node: NodeInfo, attemptIndex: number]
   'select-flow-item': [node: NodeInfo, flowItemId: string]
   'toggle-recognition': []
   'toggle-action': []
@@ -221,8 +219,8 @@ const recognitionNodeShortLabel = getFlowItemShortLabel('recognition_node')
 
         <ul v-if="isActionExpanded && hasActionNestedChildren" class="tree-list">
           <li
-            v-for="(item, attemptIndex) in actionLevelRecognitionItems"
-            :key="`tree-action-reco-${attemptIndex}`"
+            v-for="item in actionLevelRecognitionItems"
+            :key="`tree-action-reco-${item.id}`"
             class="tree-item"
             style="--tree-item-offset: 0px"
           >
@@ -232,7 +230,7 @@ const recognitionNodeShortLabel = getFlowItemShortLabel('recognition_node')
                 text
                 size="tiny"
                 :type="item.status === 'success' ? 'success' : 'warning'"
-                @click="emit('select-action-recognition', node, attemptIndex)"
+                @click="emit('select-flow-item', node, item.id)"
               >
                 <template #icon>
                   <check-circle-outlined v-if="item.status === 'success'" />

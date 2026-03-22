@@ -15,13 +15,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'select-node': [node: NodeInfo]
   'select-action': [node: NodeInfo]
   'select-recognition': [node: NodeInfo, attemptIndex: number]
-  'select-nested': [node: NodeInfo, attemptIndex: number, nestedIndex: number]
-  'select-nested-action': [node: NodeInfo, actionIndex: number, nestedIndex: number]
-  'select-action-recognition': [node: NodeInfo, attemptIndex: number]
-  'select-nested-action-recognition': [node: NodeInfo, actionIndex: number, nestedIndex: number, attemptIndex: number]
   'select-flow-item': [node: NodeInfo, flowItemId: string]
 }>()
 

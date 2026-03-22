@@ -11,7 +11,7 @@ import { BulbOutlined, BulbFilled, FileSearchOutlined, BarChartOutlined, ColumnH
 import { version } from '../package.json'
 import { useIsMobile } from './composables/useIsMobile'
 import { formatDuration } from './utils/formatDuration'
-import { buildNodeFlowItems, buildNodeRecognitionFlowItems, buildNodeTaskFlowItems } from './utils/nodeFlow'
+import { buildNodeFlowItems, buildNodeRecognitionFlowItems } from './utils/nodeFlow'
 import TourOverlay from './components/TourOverlay.vue'
 import { TOUR_STEPS, TOUR_STORAGE_KEY, TOUR_VERSION } from './tutorial/steps'
 import tutorialSampleLog from './assets/tutorial-sample.log?raw'
@@ -1247,50 +1247,10 @@ const handleSelectAction = (node: NodeInfo) => {
   selectedFlowItemId.value = pickMainActionFlowItemId(node)
 }
 
-// 选择 Action 内识别（例如 CCLevelMax）
-const handleSelectActionRecognition = (node: NodeInfo, attemptIndex: number) => {
-  selectedNode.value = node
-  selectedFlowItemId.value = pickFlowId(node, `node.action.recognition.${attemptIndex}`)
-}
-
 // 选择识别尝试
 const handleSelectRecognition = (node: NodeInfo, attemptIndex: number) => {
   selectedNode.value = node
   selectedFlowItemId.value = pickFlowId(node, `node.recognition.${attemptIndex}`)
-}
-
-// 选择嵌套节点
-const handleSelectNested = (node: NodeInfo, attemptIndex: number, nestedIndex: number) => {
-  selectedNode.value = node
-  selectedFlowItemId.value = pickFlowId(node, `node.recognition.${attemptIndex}.nested.${nestedIndex}`)
-}
-
-// 选择嵌套动作节点
-const handleSelectNestedAction = (node: NodeInfo, actionIndex: number, nestedIndex: number) => {
-  selectedNode.value = node
-  const taskItems = buildNodeTaskFlowItems(node)
-  const nestedAction = (taskItems[actionIndex]?.children ?? []).filter(item => item.type === 'pipeline_node')[nestedIndex]
-  if (!nestedAction) {
-    selectedFlowItemId.value = null
-    return
-  }
-  selectedFlowItemId.value = pickFlowId(node, nestedAction.id)
-}
-
-// 选择嵌套动作中的识别尝试（例如 CCUpdate 下的某次识别）
-const handleSelectNestedActionRecognition = (node: NodeInfo, actionIndex: number, nestedIndex: number, attemptIndex: number) => {
-  selectedNode.value = node
-  const taskItems = buildNodeTaskFlowItems(node)
-  const nestedAction = (taskItems[actionIndex]?.children ?? []).filter(item => item.type === 'pipeline_node')[nestedIndex]
-  if (!nestedAction) {
-    selectedFlowItemId.value = null
-    return
-  }
-  const recognitionItems = (nestedAction.children ?? []).filter(item =>
-    item.type === 'recognition' || item.type === 'recognition_node'
-  )
-  const target = recognitionItems[attemptIndex]
-  selectedFlowItemId.value = target ? pickFlowId(node, target.id) : null
 }
 
 // 选择任意 flow item（用于深层嵌套识别）
@@ -1643,10 +1603,6 @@ onBeforeUnmount(() => {
             @select-node="handleSelectNode"
             @select-action="handleSelectAction"
             @select-recognition="handleSelectRecognition"
-            @select-nested="handleSelectNested"
-            @select-nested-action="handleSelectNestedAction"
-            @select-action-recognition="handleSelectActionRecognition"
-            @select-nested-action-recognition="handleSelectNestedActionRecognition"
             @select-flow-item="handleSelectFlowItem"
             @file-loading-start="handleFileLoadingStart"
             @file-loading-end="handleFileLoadingEnd"
@@ -1742,10 +1698,6 @@ onBeforeUnmount(() => {
               @select-node="handleSelectNode"
               @select-action="handleSelectAction"
               @select-recognition="handleSelectRecognition"
-              @select-nested="handleSelectNested"
-              @select-nested-action="handleSelectNestedAction"
-              @select-action-recognition="handleSelectActionRecognition"
-              @select-nested-action-recognition="handleSelectNestedActionRecognition"
               @select-flow-item="handleSelectFlowItem"
               @file-loading-start="handleFileLoadingStart"
               @file-loading-end="handleFileLoadingEnd"
@@ -1852,10 +1804,6 @@ onBeforeUnmount(() => {
                   @select-node="handleSelectNode"
                   @select-action="handleSelectAction"
                   @select-recognition="handleSelectRecognition"
-                  @select-nested="handleSelectNested"
-                  @select-nested-action="handleSelectNestedAction"
-                  @select-action-recognition="handleSelectActionRecognition"
-                  @select-nested-action-recognition="handleSelectNestedActionRecognition"
                   @select-flow-item="handleSelectFlowItem"
                   @file-loading-start="handleFileLoadingStart"
                   @file-loading-end="handleFileLoadingEnd"
@@ -1970,10 +1918,6 @@ onBeforeUnmount(() => {
                   @select-node="handleSelectNode"
                   @select-action="handleSelectAction"
                   @select-recognition="handleSelectRecognition"
-                  @select-nested="handleSelectNested"
-                  @select-nested-action="handleSelectNestedAction"
-                  @select-action-recognition="handleSelectActionRecognition"
-                  @select-nested-action-recognition="handleSelectNestedActionRecognition"
                   @select-flow-item="handleSelectFlowItem"
                   @file-loading-start="handleFileLoadingStart"
                   @file-loading-end="handleFileLoadingEnd"
