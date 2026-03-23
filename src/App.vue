@@ -1618,19 +1618,13 @@ onBeforeUnmount(() => {
             <n-card size="small" title="详细信息" style="height: 100%; display: flex; flex-direction: column; position: relative" content-style="padding: 0; flex: 1; min-height: 0; overflow: hidden">
               <!-- 折叠按钮 - 左边缘中间 -->
               <n-button
-                circle
-                size="small"
+                size="tiny"
+                secondary
+                strong
                 @click="toggleDetailView"
-                style="position: absolute; left: -12px; top: 50%; transform: translateY(-50%); z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.15)"
+                style="position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 100; height: 86px; min-width: 24px; padding: 6px 4px; border-top-left-radius: 0; border-bottom-left-radius: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.15)"
               >
-                <template #icon>
-                  <n-icon>
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-                      <!-- 展开时显示向右箭头，表示点击后向右折叠 -->
-                      <path fill="currentColor" d="M8.59 16.59L10 18l6-6l-6-6l-1.41 1.41L13.17 12z"/>
-                    </svg>
-                  </n-icon>
-                </template>
+                <span style="writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 1px; font-size: 12px; line-height: 1">详情</span>
               </n-button>
               <detail-view
                 :selected-node="selectedNode"
@@ -1842,19 +1836,13 @@ onBeforeUnmount(() => {
                 <n-card size="small" title="节点详情" style="height: 100%; display: flex; flex-direction: column; position: relative" content-style="padding: 0; flex: 1; min-height: 0; overflow: hidden">
                   <!-- 折叠按钮 - 左边缘中间 -->
                   <n-button
-                    circle
-                    size="small"
+                    size="tiny"
+                    secondary
+                    strong
                     @click="toggleDetailView"
-                    style="position: absolute; left: -12px; top: 50%; transform: translateY(-50%); z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.15)"
+                    style="position: absolute; left: 0; top: 50%; transform: translateY(-50%); z-index: 100; height: 86px; min-width: 24px; padding: 6px 4px; border-top-left-radius: 0; border-bottom-left-radius: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.15)"
                   >
-                    <template #icon>
-                      <n-icon>
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-                          <!-- 展开时显示向右箭头，表示点击后向右折叠 -->
-                          <path fill="currentColor" d="M8.59 16.59L10 18l6-6l-6-6l-1.41 1.41L13.17 12z"/>
-                        </svg>
-                      </n-icon>
-                    </template>
+                    <span style="writing-mode: vertical-rl; text-orientation: upright; letter-spacing: 1px; font-size: 12px; line-height: 1">详情</span>
                   </n-button>
                   <detail-view
                     :selected-node="selectedNode"

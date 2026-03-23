@@ -815,8 +815,8 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
 <template>
   <n-card
     data-tour="analysis-process-root"
-    style="height: 100%"
-    content-style="display: flex; flex-direction: column; gap: 12px; min-height: 0"
+    style="height: 100%; overflow: visible"
+    content-style="display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: visible"
   >
     <!-- 移动端工具栏 -->
     <n-flex v-if="isMobile && tasks.length > 0" align="center" style="gap: 8px">
@@ -985,16 +985,51 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
       <!-- 桌面端：完整 NSplit 布局 -->
       <template v-else>
       <!-- 左右分栏布局 -->
+      <div class="analysis-layout-shell">
+      <n-button
+        class="panel-tab-handle panel-tab-handle--left panel-tab-handle--task"
+        size="tiny"
+        secondary
+        strong
+        :title="taskListCollapsed ? '展开任务列表' : '收起任务列表'"
+        @click="toggleTaskList"
+      >
+        <span class="panel-tab-handle__text">任务</span>
+      </n-button>
+
+      <n-button
+        class="panel-tab-handle panel-tab-handle--left panel-tab-handle--nav"
+        size="tiny"
+        secondary
+        strong
+        :title="nodeNavCollapsed ? '展开节点导航' : '收起节点导航'"
+        @click="toggleNodeNav"
+      >
+        <span class="panel-tab-handle__text">导航</span>
+      </n-button>
+
+      <n-button
+        v-if="detailViewCollapsed && onExpandDetailView"
+        class="panel-tab-handle panel-tab-handle--left panel-tab-handle--detail"
+        size="tiny"
+        secondary
+        strong
+        title="展开节点详情"
+        @click="onExpandDetailView"
+      >
+        <span class="panel-tab-handle__text">详情</span>
+      </n-button>
       <n-split
+        class="analysis-main-split"
         direction="horizontal"
         v-model:size="taskListSize"
         :min="0"
         :max="0.4"
-        style="flex: 1; min-height: 0"
+        style="flex: 1; min-height: 0; overflow: visible"
       >
         <!-- 左侧：任务列表 -->
         <template #1>
-          <n-card size="small" data-tour="analysis-task-list" style="height: 100%; display: flex; flex-direction: column; position: relative" content-style="padding: 0; flex: 1; min-height: 0; overflow: hidden">
+          <n-card size="small" data-tour="analysis-task-list" style="height: 100%; display: flex; flex-direction: column; position: relative; overflow: visible" content-style="padding: 0; flex: 1; min-height: 0; overflow: visible">
                 <template #header>
                   <n-flex align="center" justify="space-between" style="padding-right: 16px">
                     <n-text style="font-size: 14px; font-weight: 500">任务列表</n-text>
@@ -1008,22 +1043,6 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
                     </n-flex>
                   </n-flex>
                 </template>
-            <!-- 折叠按钮 - 右边缘中间 -->
-            <n-button
-              circle
-              size="small"
-              @click="toggleTaskList"
-              style="position: absolute; right: -12px; top: 50%; transform: translateY(-50%); z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.15)"
-            >
-              <template #icon>
-                <n-icon>
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-                    <!-- 展开时显示向左箭头，表示点击后向左折叠 -->
-                    <path fill="currentColor" d="M15.41 7.41L14 6l-6 6l6 6l1.41-1.41L10.83 12z"/>
-                  </svg>
-                </n-icon>
-              </template>
-            </n-button>
             <n-scrollbar ref="taskListScrollbar" style="height: 100%; max-height: 100%">
               <n-list hoverable clickable>
                 <n-list-item
@@ -1072,7 +1091,7 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
 
         <!-- 右侧：节点详情 -->
         <template #2>
-          <n-card size="small" data-tour="analysis-node-timeline" style="height: 100%; display: flex; flex-direction: column; position: relative" content-style="padding: 0; flex: 1; min-height: 0; overflow: hidden">
+          <n-card size="small" data-tour="analysis-node-timeline" style="height: 100%; display: flex; flex-direction: column; position: relative; overflow: visible" content-style="padding: 0; flex: 1; min-height: 0; overflow: visible">
             <template #header>
               <n-flex align="center" justify="space-between" style="padding-right: 16px">
                 <n-text style="font-size: 14px; font-weight: 500">节点时间线</n-text>
@@ -1101,53 +1120,18 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
                 </n-flex>
               </n-flex>
             </template>
-            <!-- 展开任务列表按钮（仅在任务列表折叠时显示） -->
-            <n-button
-              v-if="taskListCollapsed"
-              circle
-              size="small"
-              @click="toggleTaskList"
-              style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.15)"
-            >
-              <template #icon>
-                <n-icon>
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-                    <!-- 折叠时显示向右箭头，表示点击后从左侧展开 -->
-                    <path fill="currentColor" d="M8.59 16.59L10 18l6-6l-6-6l-1.41 1.41L13.17 12z"/>
-                  </svg>
-                </n-icon>
-              </template>
-            </n-button>
-
-            <!-- 展开节点详情按钮（仅在节点详情折叠时显示） -->
-            <n-button
-              v-if="detailViewCollapsed && onExpandDetailView"
-              circle
-              size="small"
-              @click="onExpandDetailView"
-              style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.15)"
-            >
-              <template #icon>
-                <n-icon>
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-                    <!-- 折叠时显示向左箭头，表示点击后从右侧展开 -->
-                    <path fill="currentColor" d="M15.41 7.41L14 6l-6 6l6 6l1.41-1.41L10.83 12z"/>
-                  </svg>
-                </n-icon>
-              </template>
-            </n-button>
-
             <!-- 节点导航和详情的分栏布局 -->
             <n-split
+              class="analysis-node-split"
               direction="horizontal"
               v-model:size="nodeNavSize"
               :min="0"
               :max="0.4"
-              style="height: 100%"
+              style="height: 100%; overflow: visible"
             >
               <!-- 左侧：节点导航列表 -->
               <template #1>
-                <n-card size="small" data-tour="analysis-node-nav" style="height: 100%; display: flex; flex-direction: column; position: relative" content-style="padding: 0; flex: 1; min-height: 0; overflow: hidden">
+                <n-card size="small" data-tour="analysis-node-nav" style="height: 100%; display: flex; flex-direction: column; position: relative; overflow: visible" content-style="padding: 0; flex: 1; min-height: 0; overflow: visible">
                   <template #header>
                     <n-flex align="center" justify="space-between" style="padding-right: 16px">
                       <n-text style="font-size: 14px; font-weight: 500">节点导航</n-text>
@@ -1161,22 +1145,6 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
                       </n-flex>
                     </n-flex>
                   </template>
-                  <!-- 折叠按钮 - 右边缘中间 -->
-                  <n-button
-                    circle
-                    size="small"
-                    @click="toggleNodeNav"
-                    style="position: absolute; right: -12px; top: 50%; transform: translateY(-50%); z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.15)"
-                  >
-                    <template #icon>
-                      <n-icon>
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-                          <!-- 展开时显示向左箭头，表示点击后向左折叠 -->
-                          <path fill="currentColor" d="M15.41 7.41L14 6l-6 6l6 6l1.41-1.41L10.83 12z"/>
-                        </svg>
-                      </n-icon>
-                    </template>
-                  </n-button>
                   <n-scrollbar ref="nodeNavScrollbar" style="height: 100%; max-height: 100%">
                     <n-list hoverable clickable v-if="currentNodes.length > 0">
                       <n-list-item
@@ -1228,24 +1196,6 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
               <!-- 右侧：节点详细卡片 -->
               <template #2>
                 <div style="height: 100%; display: flex; flex-direction: column; position: relative">
-                  <!-- 展开节点导航按钮（仅在节点导航折叠时显示） -->
-                  <n-button
-                    v-if="nodeNavCollapsed"
-                    circle
-                    size="small"
-                    @click="toggleNodeNav"
-                    style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.15)"
-                  >
-                    <template #icon>
-                      <n-icon>
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-                          <!-- 折叠时显示向右箭头，表示点击后从左侧展开 -->
-                          <path fill="currentColor" d="M8.59 16.59L10 18l6-6l-6-6l-1.41 1.41L13.17 12z"/>
-                        </svg>
-                      </n-icon>
-                    </template>
-                  </n-button>
-
                   <div v-if="currentNodes.length === 0" style="padding: 40px 0">
                     <n-empty description="暂无节点数据" />
                   </div>
@@ -1289,6 +1239,7 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
           </n-card>
         </template>
       </n-split>
+      </div>
       </template>
     </template>
 
@@ -1327,6 +1278,64 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
 
 .nav-dot-failed {
   background: #d03050;
+}
+
+.analysis-layout-shell {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding-left: 30px;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+.panel-tab-handle {
+  position: absolute;
+  z-index: 1200;
+  height: 86px;
+  min-width: 24px;
+  padding: 6px 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.panel-tab-handle--left {
+  left: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.panel-tab-handle--right {
+  right: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.panel-tab-handle--task {
+  top: 16px;
+  transform: none;
+}
+
+.panel-tab-handle--nav {
+  top: 112px;
+  transform: none;
+}
+
+.panel-tab-handle--detail {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.panel-tab-handle__text {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  letter-spacing: 1px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+:deep(.analysis-main-split .n-split-pane),
+:deep(.analysis-node-split .n-split-pane) {
+  overflow: visible;
 }
 
 /* 拖拽区域样式 */
