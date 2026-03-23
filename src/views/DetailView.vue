@@ -28,9 +28,24 @@ const convertFileSrc = (filePath: string) => {
   return `https://asset.localhost/${filePath.replace(/\\/g, '/')}`
 }
 
+const resolveImageSrc = (source: string) => {
+  const normalized = source.trim()
+  if (!normalized) return normalized
+  if (normalized.startsWith('data:') || normalized.startsWith('blob:') || /^https?:\/\//i.test(normalized)) {
+    return normalized
+  }
+  return convertFileSrc(normalized)
+}
+
 const props = defineProps<{
   selectedNode: NodeInfo | null
   selectedFlowItemId?: string | null
+  bridgeRecognitionImages?: {
+    raw: string | null
+    draws: string[]
+  } | null
+  bridgeRecognitionLoading?: boolean
+  bridgeRecognitionError?: string | null
 }>()
 
 const flattenFlowItems = (items: UnifiedFlowItem[] | undefined, output: UnifiedFlowItem[] = []): UnifiedFlowItem[] => {
@@ -220,6 +235,18 @@ const selectedFlowErrorImage = computed(() => {
   return pickFirstErrorImage(selected.children)
 })
 
+const bridgeRecognitionRawImage = computed(() => {
+  const source = props.bridgeRecognitionImages?.raw
+  if (typeof source !== 'string' || !source.trim()) return null
+  return source
+})
+
+const bridgeRecognitionDrawImages = computed(() => {
+  const draws = props.bridgeRecognitionImages?.draws
+  if (!Array.isArray(draws)) return []
+  return draws.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+})
+
 // 格式化 JSON
 const formatJson = (obj: any) => {
   return JSON.stringify(obj, null, 2)
@@ -278,13 +305,39 @@ const copyToClipboard = (text: string) => {
           <!-- 调试截图 (vision) -->
           <div v-if="(currentAttempt as any)?.vision_image" style="margin-top: 12px">
             <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">调试截图</n-text>
-            <img :src="convertFileSrc((currentAttempt as any).vision_image)" style="max-width: 100%; border-radius: 4px" alt="调试截图" />
+            <img :src="resolveImageSrc((currentAttempt as any).vision_image)" style="max-width: 100%; border-radius: 4px" alt="调试截图" />
           </div>
 
           <!-- 错误截图 -->
           <div v-if="(currentAttempt as any)?.error_image" style="margin-top: 12px">
             <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">错误截图</n-text>
-            <img :src="convertFileSrc((currentAttempt as any).error_image)" style="max-width: 100%; border-radius: 4px" alt="错误截图" />
+            <img :src="resolveImageSrc((currentAttempt as any).error_image)" style="max-width: 100%; border-radius: 4px" alt="错误截图" />
+          </div>
+
+          <div v-if="bridgeRecognitionLoading" style="margin-top: 12px">
+            <n-text depth="3" style="font-size: 13px">正在加载识别截图...</n-text>
+          </div>
+
+          <div v-if="bridgeRecognitionError" style="margin-top: 12px">
+            <n-text type="error" style="font-size: 13px">{{ bridgeRecognitionError }}</n-text>
+          </div>
+
+          <div v-if="bridgeRecognitionDrawImages.length > 0" style="margin-top: 12px">
+            <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">Draw ({{ bridgeRecognitionDrawImages.length }})</n-text>
+            <n-flex vertical style="gap: 8px">
+              <img
+                v-for="(img, idx) in bridgeRecognitionDrawImages"
+                :key="`${idx}-${img.slice(0, 24)}`"
+                :src="resolveImageSrc(img)"
+                style="max-width: 100%; border-radius: 4px"
+                :alt="`Draw ${idx + 1}`"
+              />
+            </n-flex>
+          </div>
+
+          <div v-if="bridgeRecognitionRawImage" style="margin-top: 12px">
+            <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">Raw</n-text>
+            <img :src="resolveImageSrc(bridgeRecognitionRawImage)" style="max-width: 100%; border-radius: 4px" alt="Raw" />
           </div>
 
           <!-- 原始识别数据 (折叠) -->
@@ -352,7 +405,7 @@ const copyToClipboard = (text: string) => {
               <img
                 v-for="(img, idx) in selectedNode.wait_freezes_images"
                 :key="idx"
-                :src="convertFileSrc(img)"
+                :src="resolveImageSrc(img)"
                 style="max-width: 100%; border-radius: 4px"
                 :alt="`Wait Freezes 截图 ${idx + 1}`"
               />
@@ -418,7 +471,7 @@ const copyToClipboard = (text: string) => {
             </n-descriptions-item>
 
             <n-descriptions-item label="错误截图" v-if="selectedFlowErrorImage" :span="descriptionColumns">
-              <img :src="convertFileSrc(selectedFlowErrorImage)" style="max-width: 100%; border-radius: 4px; margin-top: 8px" alt="错误截图" />
+              <img :src="resolveImageSrc(selectedFlowErrorImage)" style="max-width: 100%; border-radius: 4px; margin-top: 8px" alt="错误截图" />
             </n-descriptions-item>
           </n-descriptions>
 
@@ -492,7 +545,7 @@ const copyToClipboard = (text: string) => {
             </n-descriptions-item>
 
             <n-descriptions-item label="节点截图" v-if="selectedNode.error_image" :span="descriptionColumns">
-              <img :src="convertFileSrc(selectedNode.error_image)" style="max-width: 100%; border-radius: 4px; margin-top: 8px" alt="节点截图" />
+              <img :src="resolveImageSrc(selectedNode.error_image)" style="max-width: 100%; border-radius: 4px; margin-top: 8px" alt="节点截图" />
             </n-descriptions-item>
           </n-descriptions>
 

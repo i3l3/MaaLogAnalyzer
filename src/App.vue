@@ -226,6 +226,38 @@ interface RealtimeSessionState {
   lines: string[]
 }
 
+type QueryDetailTarget = 'reco' | 'action' | 'cached_image'
+
+interface QueryDetailParams {
+  sessionId: string
+  target: QueryDetailTarget
+  id: number
+  taskId?: number
+  task_id?: number
+}
+
+interface QueryDetailResult {
+  target: QueryDetailTarget
+  id: number
+  data: unknown
+}
+
+interface BridgeCachedImageRefs {
+  raw: number | null
+  draws: number[]
+}
+
+interface BridgeRecognitionImageState {
+  raw: string | null
+  draws: string[]
+}
+
+interface SelectedRecognitionQueryTarget {
+  sessionId: string
+  taskId: number
+  recoId: number
+}
+
 const realtimeSession = ref<RealtimeSessionState | null>(null)
 let realtimeParseTimer: number | null = null
 const realtimeParsing = ref(false)
@@ -335,6 +367,9 @@ const tasks = ref<TaskInfo[]>([])
 const selectedTask = ref<TaskInfo | null>(null)
 const selectedNode = ref<NodeInfo | null>(null)
 const selectedFlowItemId = ref<string | null>(null)
+const bridgeRecognitionImages = ref<BridgeRecognitionImageState | null>(null)
+const bridgeRecognitionLoading = ref(false)
+const bridgeRecognitionError = ref<string | null>(null)
 const loading = ref(false)
 const pendingScrollNodeId = ref<number | null>(null)
 const parseProgress = ref(0)
@@ -375,6 +410,84 @@ const pickMainActionFlowItemId = (node: NodeInfo): string | null => {
 const pickFlowId = (node: NodeInfo, preferredId: string): string | null => {
   if (hasFlowItemId(node, preferredId)) return preferredId
   return null
+}
+
+const toPositiveInteger = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const normalized = Math.trunc(value)
+    return normalized > 0 ? normalized : null
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed)) return null
+    const normalized = Math.trunc(parsed)
+    return normalized > 0 ? normalized : null
+  }
+  return null
+}
+
+const toPositiveIntegerArray = (value: unknown): number[] => {
+  if (!Array.isArray(value)) return []
+  const result: number[] = []
+  for (const item of value) {
+    const normalized = toPositiveInteger(item)
+    if (normalized == null) continue
+    result.push(normalized)
+  }
+  return result
+}
+
+const getSelectedRecognitionTarget = (): SelectedRecognitionQueryTarget | null => {
+  if (!bridgeEnabled || !bridge?.enabled) return null
+  const sessionId = realtimeSession.value?.sessionId
+  if (!sessionId) return null
+
+  const node = selectedNode.value
+  const flowItemId = selectedFlowItemId.value
+  if (!node || !flowItemId) return null
+
+  const selectedFlowItem = flattenFlowItems(buildNodeFlowItems(node)).find(item => item.id === flowItemId)
+  if (!selectedFlowItem) return null
+  if (selectedFlowItem.type !== 'recognition' && selectedFlowItem.type !== 'recognition_node') return null
+
+  const recoId = toPositiveInteger(selectedFlowItem.reco_id ?? selectedFlowItem.reco_details?.reco_id)
+  if (recoId == null) return null
+
+  const taskId = toPositiveInteger(selectedFlowItem.task_id ?? node.task_id)
+  if (taskId == null) return null
+
+  return { sessionId, taskId, recoId }
+}
+
+const parseCachedImageRefs = (detailData: unknown): BridgeCachedImageRefs => {
+  const detailRecord = asRecord(detailData)
+  const cachedImageRecord = asRecord(detailRecord?.cached_image)
+  return {
+    raw: toPositiveInteger(cachedImageRecord?.raw),
+    draws: toPositiveIntegerArray(cachedImageRecord?.draws),
+  }
+}
+
+const toImageDataUrl = (imageData: unknown): string | null => {
+  if (typeof imageData === 'string') {
+    const trimmed = imageData.trim()
+    if (trimmed.startsWith('data:image/')) return trimmed
+    return null
+  }
+
+  const imageRecord = asRecord(imageData)
+  if (!imageRecord) return null
+
+  const dataUrl = typeof imageRecord.dataUrl === 'string' ? imageRecord.dataUrl.trim() : ''
+  if (dataUrl.startsWith('data:image/')) return dataUrl
+
+  const base64 = typeof imageRecord.base64 === 'string' ? imageRecord.base64.trim() : ''
+  if (!base64) return null
+
+  const mimeType = typeof imageRecord.mimeType === 'string' && imageRecord.mimeType.trim()
+    ? imageRecord.mimeType.trim()
+    : 'image/png'
+  return `data:${mimeType};base64,${base64}`
 }
 
 const resetSelectionState = () => {
@@ -671,6 +784,109 @@ bridge = useBridge({
     await handleJsonRpcMethod(method, params, id)
   },
 })
+
+let bridgeRecoLoadToken = 0
+
+const clearBridgeRecognitionState = () => {
+  bridgeRecognitionImages.value = null
+  bridgeRecognitionLoading.value = false
+  bridgeRecognitionError.value = null
+}
+
+const queryBridgeDetail = async (params: QueryDetailParams): Promise<QueryDetailResult> => {
+  if (!bridge?.enabled) {
+    throw new Error('Bridge is disabled')
+  }
+  const result = await bridge.sendRequest('query.detail', params, { timeoutMs: 12000 })
+  const record = asRecord(result)
+  if (!record) {
+    throw new Error('Invalid query.detail response')
+  }
+
+  const target = record.target
+  if (target !== 'reco' && target !== 'action' && target !== 'cached_image') {
+    throw new Error('Invalid query.detail target')
+  }
+
+  const id = toPositiveInteger(record.id) ?? params.id
+  return {
+    target,
+    id,
+    data: record.data,
+  }
+}
+
+const loadCachedImageDataUrl = async (sessionId: string, taskId: number, imageRefId: number): Promise<string | null> => {
+  const result = await queryBridgeDetail({
+    sessionId,
+    target: 'cached_image',
+    id: imageRefId,
+    taskId,
+    task_id: taskId,
+  })
+  return toImageDataUrl(result.data)
+}
+
+const loadBridgeRecognitionImages = async () => {
+  const target = getSelectedRecognitionTarget()
+  const requestToken = ++bridgeRecoLoadToken
+
+  if (!target) {
+    clearBridgeRecognitionState()
+    return
+  }
+
+  bridgeRecognitionLoading.value = true
+  bridgeRecognitionError.value = null
+  bridgeRecognitionImages.value = null
+
+  try {
+    const recoResult = await queryBridgeDetail({
+      sessionId: target.sessionId,
+      target: 'reco',
+      id: target.recoId,
+      taskId: target.taskId,
+      task_id: target.taskId,
+    })
+
+    if (requestToken !== bridgeRecoLoadToken) return
+
+    const refs = parseCachedImageRefs(recoResult.data)
+    const rawPromise = refs.raw != null
+      ? loadCachedImageDataUrl(target.sessionId, target.taskId, refs.raw)
+      : Promise.resolve<string | null>(null)
+    const drawPromises = refs.draws.map(refId => loadCachedImageDataUrl(target.sessionId, target.taskId, refId))
+
+    const [raw, drawResults] = await Promise.all([
+      rawPromise,
+      Promise.all(drawPromises),
+    ])
+
+    if (requestToken !== bridgeRecoLoadToken) return
+
+    bridgeRecognitionImages.value = {
+      raw,
+      draws: drawResults.filter((item): item is string => typeof item === 'string' && item.length > 0),
+    }
+  } catch (error) {
+    if (requestToken !== bridgeRecoLoadToken) return
+    bridgeRecognitionError.value = getErrorMessage(error)
+  } finally {
+    if (requestToken === bridgeRecoLoadToken) {
+      bridgeRecognitionLoading.value = false
+    }
+  }
+}
+
+const bridgeRecognitionQueryKey = computed(() => {
+  const target = getSelectedRecognitionTarget()
+  if (!target) return ''
+  return `${target.sessionId}:${target.taskId}:${target.recoId}`
+})
+
+watch(bridgeRecognitionQueryKey, () => {
+  void loadBridgeRecognitionImages()
+}, { immediate: true })
 // 过滤器状态
 const selectedProcessId = ref<string>('')
 const selectedThreadId = ref<string>('')
@@ -1340,6 +1556,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  bridgeRecoLoadToken += 1
+  clearBridgeRecognitionState()
   window.removeEventListener('resize', handleTourViewportChange)
   window.removeEventListener('scroll', handleTourViewportChange, true)
   if (realtimeParseTimer != null) {
@@ -1576,6 +1794,9 @@ onBeforeUnmount(() => {
               <detail-view
                 :selected-node="selectedNode"
                 :selected-flow-item-id="selectedFlowItemId"
+                :bridge-recognition-images="bridgeRecognitionImages"
+                :bridge-recognition-loading="bridgeRecognitionLoading"
+                :bridge-recognition-error="bridgeRecognitionError"
                 style="height: 100%"
               />
             </n-drawer-content>
@@ -1629,6 +1850,9 @@ onBeforeUnmount(() => {
               <detail-view
                 :selected-node="selectedNode"
                 :selected-flow-item-id="selectedFlowItemId"
+                :bridge-recognition-images="bridgeRecognitionImages"
+                :bridge-recognition-loading="bridgeRecognitionLoading"
+                :bridge-recognition-error="bridgeRecognitionError"
                 style="height: 100%"
               />
             </n-card>
@@ -1786,6 +2010,9 @@ onBeforeUnmount(() => {
               <detail-view
                 :selected-node="selectedNode"
                 :selected-flow-item-id="selectedFlowItemId"
+                :bridge-recognition-images="bridgeRecognitionImages"
+                :bridge-recognition-loading="bridgeRecognitionLoading"
+                :bridge-recognition-error="bridgeRecognitionError"
                 style="height: 100%"
               />
             </n-drawer-content>
@@ -1847,6 +2074,9 @@ onBeforeUnmount(() => {
                   <detail-view
                     :selected-node="selectedNode"
                     :selected-flow-item-id="selectedFlowItemId"
+                    :bridge-recognition-images="bridgeRecognitionImages"
+                    :bridge-recognition-loading="bridgeRecognitionLoading"
+                    :bridge-recognition-error="bridgeRecognitionError"
                     style="height: 100%"
                   />
                 </n-card>

@@ -217,7 +217,7 @@ interface RealtimeEndParams {
 
 ### 5.8 query.detail（Request）
 
-Analyzer -> Support，按需查询详情（V1.5）。
+Analyzer -> Support，按需查询详情（V1.6，图片懒加载）。
 
 请求参数：
 
@@ -226,8 +226,20 @@ interface QueryDetailParams {
   sessionId: string
   target: 'reco' | 'action' | 'cached_image'
   id: number
+  taskId?: number
+  task_id?: number
 }
 ```
+
+字段语义：
+
+1. `target='reco'`：`id` 是 `reco_id`。
+2. `target='action'`：`id` 是 `action_id`。
+3. `target='cached_image'`：`id` 是图片引用 id（不是 `reco_id` / `action_id`）。
+4. `taskId/task_id`：用于跨 task 同 id 场景下精确命中。
+   - 约定：`target='reco'|'action'` 时应至少提供其一（`taskId` 或 `task_id`）。
+   - `target='cached_image'` 可不传；若传入则用于额外校验上下文。
+5. `target='cached_image'` 查询时，`id` 必须来自上一跳 `reco/action` 返回的 `cached_image` 引用。
 
 返回：
 
@@ -238,6 +250,37 @@ interface QueryDetailResult {
   data: unknown
 }
 ```
+
+`data` 建议结构：
+
+```ts
+interface QueryDetailRecoData {
+  info: Record<string, unknown>
+  cached_image?: {
+    raw?: number
+    draws?: number[]
+  }
+}
+
+interface QueryDetailActionData {
+  info: Record<string, unknown>
+}
+
+interface QueryDetailCachedImageData {
+  dataUrl: string // 例如 data:image/png;base64,...
+}
+```
+
+约束：
+
+1. `reco/action` 默认不返回 `raw/draw` 图片正文，只返回 `cached_image` 引用 id。
+2. 图片正文仅通过 `target='cached_image'` 获取，避免实时推送阶段提前占用 Analyzer 内存。
+3. Support 侧按 `sessionId + taskId + (reco_id/action_id)` 维护详情缓存，避免跨 task 串数据。
+4. Analyzer 推荐调用顺序：
+   1) `query.detail(target='reco', id=reco_id, taskId=task_id)`
+   2) 读取 `data.cached_image.raw/draws`
+   3) 对每个图片引用 id 调 `query.detail(target='cached_image', id=<refId>, taskId=task_id)`
+5. `cached_image.id` 与 `reco_id/action_id` 语义不同，禁止混用。
 
 ### 5.9 realtime.snapshot.request（Request）
 
@@ -317,7 +360,7 @@ Analyzer 应映射为标准名：
 
 1. `-32001`：NOT_FOUND（详情不存在）
 2. `-32002`：SESSION_NOT_FOUND
-3. `-32003`：SNAPSHOT_NOT_AVAILABLE
+3. `-32003`：SNAPSHOT_NOT_AVAILABLE（保留码，当前实现可未启用）
 4. `-32004`：INVALID_PARAMS
 5. `-32005`：INTERNAL_ERROR
 
