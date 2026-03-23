@@ -986,39 +986,41 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
       <template v-else>
       <!-- 左右分栏布局 -->
       <div class="analysis-layout-shell">
-      <n-button
-        class="panel-tab-handle panel-tab-handle--left panel-tab-handle--task"
-        size="tiny"
-        secondary
-        strong
-        :title="taskListCollapsed ? '展开任务列表' : '收起任务列表'"
-        @click="toggleTaskList"
-      >
-        <span class="panel-tab-handle__text">任务</span>
-      </n-button>
+      <div class="analysis-layout-rail">
+        <n-button
+          class="panel-tab-handle panel-tab-handle--left panel-tab-handle--task"
+          size="tiny"
+          secondary
+          strong
+          :title="taskListCollapsed ? '展开任务列表' : '收起任务列表'"
+          @click="toggleTaskList"
+        >
+          <span class="panel-tab-handle__text">任务</span>
+        </n-button>
 
-      <n-button
-        class="panel-tab-handle panel-tab-handle--left panel-tab-handle--nav"
-        size="tiny"
-        secondary
-        strong
-        :title="nodeNavCollapsed ? '展开节点导航' : '收起节点导航'"
-        @click="toggleNodeNav"
-      >
-        <span class="panel-tab-handle__text">导航</span>
-      </n-button>
+        <n-button
+          class="panel-tab-handle panel-tab-handle--left panel-tab-handle--nav"
+          size="tiny"
+          secondary
+          strong
+          :title="nodeNavCollapsed ? '展开节点导航' : '收起节点导航'"
+          @click="toggleNodeNav"
+        >
+          <span class="panel-tab-handle__text">导航</span>
+        </n-button>
 
-      <n-button
-        v-if="detailViewCollapsed && onExpandDetailView"
-        class="panel-tab-handle panel-tab-handle--left panel-tab-handle--detail"
-        size="tiny"
-        secondary
-        strong
-        title="展开节点详情"
-        @click="onExpandDetailView"
-      >
-        <span class="panel-tab-handle__text">详情</span>
-      </n-button>
+        <n-button
+          v-if="detailViewCollapsed && onExpandDetailView"
+          class="panel-tab-handle panel-tab-handle--left panel-tab-handle--detail"
+          size="tiny"
+          secondary
+          strong
+          title="展开节点详情"
+          @click="onExpandDetailView"
+        >
+          <span class="panel-tab-handle__text">详情</span>
+        </n-button>
+      </div>
       <n-split
         class="analysis-main-split"
         direction="horizontal"
@@ -1281,19 +1283,24 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
 }
 
 .analysis-layout-shell {
-  position: relative;
+  display: flex;
   flex: 1;
   min-height: 0;
-  padding-left: 30px;
-  box-sizing: border-box;
+  overflow: visible;
+}
+
+.analysis-layout-rail {
+  width: 30px;
+  flex-shrink: 0;
+  position: relative;
   overflow: visible;
 }
 
 .panel-tab-handle {
   position: absolute;
   z-index: 1200;
-  height: 86px;
-  min-width: 24px;
+  height: 84px;
+  min-width: 28px;
   padding: 6px 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
