@@ -669,6 +669,13 @@ export class LogParser {
       const recoId = typeof value === 'number' ? value : Number(value)
       return Number.isFinite(recoId) ? recoId : null
     }
+    const resolveRecognitionNodeRecoId = (details: Record<string, any>): number | null => {
+      return normalizeRecoId(
+        details.reco_details?.reco_id ??
+        details.reco_id ??
+        details.node_details?.reco_id
+      )
+    }
     const startRecognitionAttempt = (
       taskId: number,
       details: Record<string, any>,
@@ -1350,9 +1357,7 @@ export class LogParser {
           }
 
           case 'Node.RecognitionNode.Starting': {
-            const recoId = normalizeRecoId(
-              details.reco_details?.reco_id ?? details.reco_id ?? details.node_id
-            )
+            const recoId = resolveRecognitionNodeRecoId(details)
             if (recoId != null) {
               const startTimestamp = this.stringPool.intern(event.timestamp)
               recognitionNodeStartTimes.set(recoId, startTimestamp)
@@ -1389,18 +1394,45 @@ export class LogParser {
               subTasks.consumeRecognitions(task.task_id)
             )
             if (normalizedPendingRecognitions.length > 0) {
+              const pendingRecoId = resolveRecognitionNodeRecoId(details)
+              const pendingNodeKey = pendingRecoId != null
+                ? scopedKey(task.task_id, pendingRecoId)
+                : null
+              const pendingRecoNodeAttempt = pendingNodeKey
+                ? activeRecognitionNodeAttempts.get(pendingNodeKey)
+                : undefined
+              if (pendingRecoNodeAttempt && pendingRecoId != null) {
+                const timestamp = this.stringPool.intern(event.timestamp)
+                const startTimestamp = recognitionNodeStartTimes.get(pendingRecoId) || timestamp
+                pendingRecoNodeAttempt.name = this.stringPool.intern(details.name || pendingRecoNodeAttempt.name || '')
+                pendingRecoNodeAttempt.ts = pendingRecoNodeAttempt.ts || startTimestamp
+                pendingRecoNodeAttempt.end_ts = timestamp
+                pendingRecoNodeAttempt.status = message === 'Node.RecognitionNode.Succeeded' ? 'success' : 'failed'
+                pendingRecoNodeAttempt.reco_details = details.reco_details
+                  ? markRaw(details.reco_details)
+                  : pendingRecoNodeAttempt.reco_details
+                pendingRecoNodeAttempt.error_image = this.findRecognitionImage(event.timestamp, details.name || '')
+                pendingRecoNodeAttempt.vision_image = this.findVisionImage(event.timestamp, details.name || '', pendingRecoId)
+                const existingMeta = recognitionOrderMeta.get(pendingRecoNodeAttempt)
+                recognitionOrderMeta.set(pendingRecoNodeAttempt, {
+                  startSeq: existingMeta?.startSeq ?? eventOrder,
+                  endSeq: eventOrder,
+                })
+              }
               for (const recognition of normalizedPendingRecognitions) {
+                const resolvedRecognition = (
+                  pendingRecoId != null &&
+                  pendingRecoNodeAttempt &&
+                  recognition.reco_id === pendingRecoId
+                ) ? pendingRecoNodeAttempt : recognition
                 if (parentRecognition && parentRecognition.reco_id !== recognition.reco_id) {
-                  attachNodeToAttempt(parentRecognition, recognition)
+                  attachNodeToAttempt(parentRecognition, resolvedRecognition)
                   continue
                 }
-                if (!isKnownRecognitionRecoId(recognition.reco_id)) {
-                  pushActionLevelRecognition(recognition)
+                if (!isKnownRecognitionRecoId(resolvedRecognition.reco_id)) {
+                  pushActionLevelRecognition(resolvedRecognition)
                 }
               }
-              const pendingRecoId = normalizeRecoId(
-                details.reco_details?.reco_id ?? details.reco_id ?? details.node_id
-              )
               if (pendingRecoId != null) {
                 activeRecognitionNodeAttempts.delete(scopedKey(task.task_id, pendingRecoId))
                 recognitionNodeStartTimes.delete(pendingRecoId)
@@ -1409,9 +1441,7 @@ export class LogParser {
               break
             }
 
-            const recoId = normalizeRecoId(
-              details.reco_details?.reco_id ?? details.reco_id ?? details.node_id
-            )
+            const recoId = resolveRecognitionNodeRecoId(details)
             if (recoId == null) {
               break
             }
@@ -1802,9 +1832,7 @@ export class LogParser {
 
         case 'Node.RecognitionNode.Starting': {
           if (subTaskId == null) break
-          const recoId = normalizeRecoId(
-            details.reco_details?.reco_id ?? details.reco_id ?? details.node_id
-          )
+          const recoId = resolveRecognitionNodeRecoId(details)
           if (recoId != null) {
             const startTimestamp = this.stringPool.intern(event.timestamp)
             const nodeKey = scopedKey(subTaskId, recoId)
@@ -1838,14 +1866,43 @@ export class LogParser {
           const normalizedNestedRecognitions = dedupeRecognitionAttempts(nestedRecognitions)
           const parentRecognition = findActiveParentRecognition(subTaskId)
           if (normalizedNestedRecognitions.length > 0) {
+            const pendingRecoId = resolveRecognitionNodeRecoId(details)
+            const pendingNodeKey = pendingRecoId != null ? scopedKey(subTaskId, pendingRecoId) : null
+            const pendingRecoNodeAttempt = pendingNodeKey
+              ? activeRecognitionNodeAttempts.get(pendingNodeKey)
+              : undefined
+            if (pendingRecoNodeAttempt && pendingNodeKey) {
+              const timestamp = this.stringPool.intern(event.timestamp)
+              const startTimestamp = subTaskRecognitionNodeStartTimes.get(pendingNodeKey) || timestamp
+              pendingRecoNodeAttempt.name = this.stringPool.intern(details.name || pendingRecoNodeAttempt.name || '')
+              pendingRecoNodeAttempt.ts = pendingRecoNodeAttempt.ts || startTimestamp
+              pendingRecoNodeAttempt.end_ts = timestamp
+              pendingRecoNodeAttempt.status = message === 'Node.RecognitionNode.Succeeded' ? 'success' : 'failed'
+              pendingRecoNodeAttempt.reco_details = details.reco_details
+                ? markRaw(details.reco_details)
+                : pendingRecoNodeAttempt.reco_details
+              if (pendingRecoId != null) {
+                pendingRecoNodeAttempt.error_image = this.findRecognitionImage(event.timestamp, details.name || '')
+                pendingRecoNodeAttempt.vision_image = this.findVisionImage(event.timestamp, details.name || '', pendingRecoId)
+              }
+              const existingMeta = recognitionOrderMeta.get(pendingRecoNodeAttempt)
+              recognitionOrderMeta.set(pendingRecoNodeAttempt, {
+                startSeq: existingMeta?.startSeq ?? eventOrder,
+                endSeq: eventOrder,
+              })
+            }
             for (const recognition of normalizedNestedRecognitions) {
+              const resolvedRecognition = (
+                pendingRecoId != null &&
+                pendingRecoNodeAttempt &&
+                recognition.reco_id === pendingRecoId
+              ) ? pendingRecoNodeAttempt : recognition
               if (parentRecognition && parentRecognition.reco_id !== recognition.reco_id) {
-                attachNodeToAttempt(parentRecognition, recognition)
+                attachNodeToAttempt(parentRecognition, resolvedRecognition)
                 continue
               }
-              subTasks.addRecognition(subTaskId, recognition)
+              subTasks.addRecognition(subTaskId, resolvedRecognition)
             }
-            const pendingRecoId = normalizeRecoId(details.reco_details?.reco_id ?? details.reco_id ?? details.node_id)
             if (pendingRecoId != null) {
               const nodeKey = scopedKey(subTaskId, pendingRecoId)
               activeRecognitionNodeAttempts.delete(nodeKey)
@@ -1854,7 +1911,7 @@ export class LogParser {
             refreshActivePipelineNodePreview(event.timestamp)
             break
           }
-          const recoId = normalizeRecoId(details.reco_details?.reco_id ?? details.reco_id ?? details.node_id)
+          const recoId = resolveRecognitionNodeRecoId(details)
           if (recoId == null) break
           const timestamp = this.stringPool.intern(event.timestamp)
           const nodeKey = scopedKey(subTaskId, recoId)
