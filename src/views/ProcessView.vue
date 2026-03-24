@@ -377,6 +377,18 @@ const toggleFollowLast = () => {
   }
 }
 
+const stopFollowOnScrollUp = () => {
+  if (!isRealtimeStreaming.value) return
+  if (!followLast.value) return
+  followLast.value = false
+}
+
+const handleFollowWheel = (event: WheelEvent) => {
+  if (event.deltaY < 0) {
+    stopFollowOnScrollUp()
+  }
+}
+
 const getLastFlowPathSignature = (items: NodeInfo['node_flow']) => {
   if (!items || items.length === 0) return '0'
   const parts: string[] = [`L${items.length}`]
@@ -1095,7 +1107,7 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
                     </n-flex>
                   </n-flex>
                 </template>
-            <n-scrollbar ref="taskListScrollbar" style="height: 100%; max-height: 100%">
+            <n-scrollbar ref="taskListScrollbar" style="height: 100%; max-height: 100%" @wheel.passive="handleFollowWheel">
               <n-list hoverable clickable>
                 <n-list-item
                   v-for="(task, index) in tasks"
@@ -1197,7 +1209,7 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
                       </n-flex>
                     </n-flex>
                   </template>
-                  <n-scrollbar ref="nodeNavScrollbar" style="height: 100%; max-height: 100%">
+                  <n-scrollbar ref="nodeNavScrollbar" style="height: 100%; max-height: 100%" @wheel.passive="handleFollowWheel">
                     <n-list hoverable clickable v-if="currentNodes.length > 0">
                       <n-list-item
                         v-for="(node, index) in currentNodes"
@@ -1247,7 +1259,7 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
 
               <!-- 右侧：节点详细卡片 -->
               <template #2>
-                <div style="height: 100%; display: flex; flex-direction: column; position: relative">
+                <div style="height: 100%; display: flex; flex-direction: column; position: relative" @wheel.passive="handleFollowWheel">
                   <div v-if="currentNodes.length === 0" style="padding: 40px 0">
                     <n-empty description="暂无节点数据" />
                   </div>
