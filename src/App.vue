@@ -2741,7 +2741,8 @@ onBeforeUnmount(() => {
               <n-tag type="info">TypeScript</n-tag>
               <n-tag type="info">Naive UI</n-tag>
               <n-tag type="info">Vite</n-tag>
-              <n-tag type="info">Tauri</n-tag>
+              <n-tag v-if="!isVscodeLaunchEmbed" type="info">Tauri</n-tag>
+              <n-tag v-else type="success">VS Code Webview</n-tag>
             </n-flex>
             <n-button
               text
@@ -2766,6 +2767,21 @@ onBeforeUnmount(() => {
             <n-button data-tour="about-start-tutorial" type="primary" :loading="tutorialLoadingSample" @click="openTutorialFromAbout">
               开始新手教程
             </n-button>
+          </n-flex>
+        </n-card>
+
+        <n-card v-if="isVscodeLaunchEmbed" size="small" :bordered="true">
+          <n-flex vertical style="gap: 10px">
+            <n-text strong>VS Code 嵌入模式</n-text>
+            <n-text depth="3" style="font-size: 13px">
+              当前运行在 VS Code iframe 中，部分能力由 Support 宿主接管。
+            </n-text>
+            <n-flex wrap style="gap: 8px">
+              <n-tag size="small" type="info">Embed: {{ appEmbedMode }}</n-tag>
+              <n-tag size="small" :type="bridgeEnabled ? 'success' : 'warning'">
+                Bridge: {{ bridgeEnabled ? '已启用' : '未启用' }}
+              </n-tag>
+            </n-flex>
           </n-flex>
         </n-card>
 
