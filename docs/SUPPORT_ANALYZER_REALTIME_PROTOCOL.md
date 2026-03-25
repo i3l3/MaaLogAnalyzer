@@ -221,7 +221,7 @@ interface RealtimeEndParams {
 
 ### 5.8 query.detail（Request）
 
-Analyzer -> Support，按需查询详情（V1.6，图片懒加载）。
+Analyzer -> Support，按需查询详情（图片懒加载）。
 
 请求参数：
 
@@ -389,7 +389,7 @@ interface CommandOpenCropResult {
 
 ### 5.13 realtime.snapshot.request（Request）
 
-Analyzer -> Support，请求断线恢复（V2）。
+Analyzer -> Support，请求断线恢复。
 
 请求参数：
 
@@ -465,7 +465,7 @@ Analyzer 应映射为标准名：
 
 1. `-32001`：NOT_FOUND（详情不存在）
 2. `-32002`：SESSION_NOT_FOUND
-3. `-32003`：SNAPSHOT_NOT_AVAILABLE（保留码，当前实现可未启用）
+3. `-32003`：SNAPSHOT_NOT_AVAILABLE（保留码，可用于快照不可用场景）
 4. `-32004`：INVALID_PARAMS
 5. `-32005`：INTERNAL_ERROR
 
