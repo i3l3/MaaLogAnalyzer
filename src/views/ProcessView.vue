@@ -2,7 +2,7 @@
 import { ref, computed, watch, nextTick, h, onMounted, onUnmounted } from 'vue'
 import {
   NCard, NButton, NIcon, NText, NFlex, NDropdown,
-  NScrollbar, NEmpty, NBadge, NTag, NSplit, NList, NListItem
+  NScrollbar, NEmpty, NBadge, NTag, NSplit, NList, NListItem, NInput
 } from 'naive-ui'
 import { CloudUploadOutlined, FolderOpenOutlined, FileOutlined, FolderOutlined, MenuOutlined, VerticalAlignTopOutlined, VerticalAlignBottomOutlined } from '@vicons/antd'
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
@@ -135,12 +135,148 @@ const getNodeNavDotClass = (status: NodeInfo['status']) => {
   return 'nav-dot-failed'
 }
 
+type NodeNavMatchKind = 'node' | 'next-list' | 'flow'
+interface NodeNavMatchDetail {
+  kind: NodeNavMatchKind
+  text: string
+}
+
+const normalizeSearchText = (value: unknown): string => {
+  if (typeof value !== 'string') return ''
+  return value.trim().toLowerCase()
+}
+
+const includesSearchText = (value: unknown, query: string): boolean => {
+  if (!query) return true
+  if (typeof value !== 'string') return false
+  return value.toLowerCase().includes(query)
+}
+
+const buildNextListDisplayName = (item: NonNullable<NodeInfo['next_list']>[number]): string => {
+  const prefixes: string[] = []
+  if (item.anchor) prefixes.push('[Anchor]')
+  if (item.jump_back) prefixes.push('[JumpBack]')
+  if (prefixes.length === 0) return item.name || '未命名 Next'
+  return `${prefixes.join(' ')} ${item.name || ''}`.trim()
+}
+
+const matchesKeyword = (query: string, keyword: string): boolean => {
+  return keyword.includes(query) || query.includes(keyword)
+}
+
+const isJumpBackKeyword = (query: string): boolean => {
+  return matchesKeyword(query, 'jumpback') || matchesKeyword(query, 'jump back') || matchesKeyword(query, '跳回')
+}
+
+const isAnchorKeyword = (query: string): boolean => {
+  return matchesKeyword(query, 'anchor') || matchesKeyword(query, '锚点')
+}
+
+const pushUniqueNodeNavMatchDetail = (
+  output: NodeNavMatchDetail[],
+  seen: Set<string>,
+  detail: NodeNavMatchDetail,
+) => {
+  const key = `${detail.kind}:${detail.text}`
+  if (seen.has(key)) return
+  seen.add(key)
+  output.push(detail)
+}
+
+const collectNodeFlowMatchDetails = (
+  items: UnifiedFlowItem[] | undefined,
+  query: string,
+  output: NodeNavMatchDetail[],
+  seen: Set<string>,
+  limit: number,
+) => {
+  if (!items || items.length === 0) return
+  const stack: UnifiedFlowItem[] = [...items]
+  while (stack.length > 0 && output.length < limit) {
+    const current = stack.pop()
+    if (!current) continue
+    const candidates = [current.name, current.reco_details?.name, current.action_details?.name]
+    for (const candidate of candidates) {
+      if (!includesSearchText(candidate, query)) continue
+      pushUniqueNodeNavMatchDetail(output, seen, {
+        kind: 'flow',
+        text: candidate as string,
+      })
+      if (output.length >= limit) break
+    }
+    if (output.length >= limit) break
+    if (current.children?.length) {
+      stack.push(...current.children)
+    }
+  }
+}
+
+const collectNodeNavMatchDetails = (node: NodeInfo, query: string): NodeNavMatchDetail[] => {
+  if (!query) return []
+
+  const details: NodeNavMatchDetail[] = []
+  const seen = new Set<string>()
+  const limit = 6
+
+  if (includesSearchText(node.name, query)) {
+    pushUniqueNodeNavMatchDetail(details, seen, { kind: 'node', text: node.name || '未命名节点' })
+  }
+
+  for (const item of node.next_list ?? []) {
+    if (details.length >= limit) break
+    const display = buildNextListDisplayName(item)
+    if (
+      includesSearchText(item.name, query) ||
+      includesSearchText(display, query) ||
+      (item.jump_back && isJumpBackKeyword(query)) ||
+      (item.anchor && isAnchorKeyword(query))
+    ) {
+      pushUniqueNodeNavMatchDetail(details, seen, { kind: 'next-list', text: display })
+    }
+  }
+
+  if (details.length < limit) {
+    collectNodeFlowMatchDetails(node.node_flow, query, details, seen, limit)
+  }
+
+  return details
+}
+
+const getNodeNavMatchKinds = (details: NodeNavMatchDetail[]): NodeNavMatchKind[] => {
+  const order: NodeNavMatchKind[] = ['node', 'next-list', 'flow']
+  return order.filter((kind) => details.some((detail) => detail.kind === kind))
+}
+
+const formatNodeNavMatchHint = (kinds: NodeNavMatchKind[]): string => {
+  const labels = kinds.map((kind) => {
+    if (kind === 'next-list') return 'Next'
+    if (kind === 'flow') return '流程'
+    return '节点'
+  })
+  return labels.join('/')
+}
+
+const formatNodeNavMatchDetail = (detail: NodeNavMatchDetail): string => {
+  if (detail.kind === 'next-list') return `Next: ${detail.text}`
+  if (detail.kind === 'flow') return `流程: ${detail.text}`
+  return `节点: ${detail.text}`
+}
+
+const formatNodeNavMatchPreview = (details: NodeNavMatchDetail[]): string => {
+  if (details.length === 0) return ''
+  const shown = details.slice(0, 2).map(formatNodeNavMatchDetail).join('；')
+  if (details.length <= 2) return shown
+  return `${shown}（共 ${details.length} 处）`
+}
+
 // 当前选中的任务索引
 const activeTaskIndex = ref(0)
 const followLast = ref(true)
 const isRealtimeStreaming = computed(() => props.isRealtimeStreaming === true)
 const showRealtimeStatus = computed(() => props.showRealtimeStatus === true)
 const showReloadControls = computed(() => props.showReloadControls === true)
+const nodeNavSearchText = ref('')
+const normalizedNodeNavSearchText = computed(() => normalizeSearchText(nodeNavSearchText.value))
 
 // 文件读取加载状态
 const fileLoading = ref(false)
@@ -330,6 +466,21 @@ const currentNodes = computed(() => {
     ...node,
     _uniqueKey: `${taskId}-${node.node_id}`
   }))
+})
+
+const nodeNavItems = computed(() => {
+  const query = normalizedNodeNavSearchText.value
+  return currentNodes.value
+    .map((node, originalIndex) => ({
+      node,
+      originalIndex,
+      matchDetails: collectNodeNavMatchDetails(node, query),
+    }))
+    .map((item) => ({
+      ...item,
+      matchKinds: getNodeNavMatchKinds(item.matchDetails),
+    }))
+    .filter((item) => !query || item.matchDetails.length > 0)
 })
 
 // 虚拟滚动引用
@@ -1237,12 +1388,21 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
                       </n-flex>
                     </n-flex>
                   </template>
-                  <n-scrollbar ref="nodeNavScrollbar" style="height: 100%; max-height: 100%" @wheel.passive="handleFollowWheel">
-                    <n-list hoverable clickable v-if="currentNodes.length > 0">
+                  <div style="display: flex; flex-direction: column; height: 100%; min-height: 0">
+                    <div style="padding: 0 12px 8px 12px">
+                      <n-input
+                        v-model:value="nodeNavSearchText"
+                        clearable
+                        size="small"
+                        placeholder="搜索节点 / 识别 / Next"
+                      />
+                    </div>
+                    <n-scrollbar ref="nodeNavScrollbar" style="flex: 1; min-height: 0" @wheel.passive="handleFollowWheel">
+                    <n-list hoverable clickable v-if="nodeNavItems.length > 0">
                       <n-list-item
-                        v-for="(node, index) in currentNodes"
-                        :key="`nav-${node.task_id}-${node.node_id}`"
-                        @click="scrollToNode(index)"
+                        v-for="item in nodeNavItems"
+                        :key="`nav-${item.node.task_id}-${item.node.node_id}`"
+                        @click="scrollToNode(item.originalIndex)"
                         :style="{
                           cursor: 'pointer',
                           padding: settings.displayMode === 'detailed' ? '8px 12px' : '4px 8px'
@@ -1251,37 +1411,89 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
                         <!-- 详细模式：两行布局 -->
                         <n-flex v-if="settings.displayMode === 'detailed'" vertical style="gap: 4px">
                           <n-flex align="center" style="gap: 8px">
-                            <n-text strong style="font-size: 13px">{{ node.name || '未命名节点' }}</n-text>
+                            <n-text strong style="font-size: 13px">{{ item.node.name || '未命名节点' }}</n-text>
                             <n-text depth="3" style="font-size: 11px">
-                              {{ extractTime(node.ts) }}
+                              {{ extractTime(item.node.ts) }}
                             </n-text>
                           </n-flex>
                           <n-flex align="center" style="gap: 8px">
-                            <n-tag size="small" :type="getRuntimeStatusTagType(node.status)">
-                              {{ getRuntimeStatusText(node.status) }}
+                            <n-tag size="small" :type="getRuntimeStatusTagType(item.node.status)">
+                              {{ getRuntimeStatusText(item.node.status) }}
+                            </n-tag>
+                            <n-tag
+                              v-if="normalizedNodeNavSearchText && item.matchDetails.length > 0"
+                              size="small"
+                              type="info"
+                            >
+                              {{ formatNodeNavMatchHint(item.matchKinds) }}
                             </n-tag>
                             <n-text depth="3" style="font-size: 11px">
-                              #{{ index + 1 }}
+                              #{{ item.originalIndex + 1 }}
                             </n-text>
                           </n-flex>
+                          <n-text
+                            v-if="normalizedNodeNavSearchText && item.matchDetails.length > 0"
+                            depth="3"
+                            class="node-nav-match-preview"
+                          >
+                            {{ formatNodeNavMatchPreview(item.matchDetails) }}
+                          </n-text>
                         </n-flex>
 
                         <!-- 紧凑模式：单行，小字号 -->
-                        <n-flex v-else-if="settings.displayMode === 'compact'" align="center" style="gap: 6px">
-                          <span class="nav-status-dot" :class="getNodeNavDotClass(node.status)" />
-                          <n-text style="font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ node.name || '未命名节点' }}</n-text>
-                          <n-text depth="3" style="font-size: 10px; flex-shrink: 0">{{ extractTime(node.ts) }}</n-text>
+                        <n-flex v-else-if="settings.displayMode === 'compact'" vertical style="gap: 2px">
+                          <n-flex align="center" style="gap: 6px">
+                            <span class="nav-status-dot" :class="getNodeNavDotClass(item.node.status)" />
+                            <n-text style="font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{ item.node.name || '未命名节点' }}</n-text>
+                            <n-tag
+                              v-if="normalizedNodeNavSearchText && item.matchDetails.length > 0"
+                              size="tiny"
+                              type="info"
+                            >
+                              {{ formatNodeNavMatchHint(item.matchKinds) }}
+                            </n-tag>
+                            <n-text depth="3" style="font-size: 10px; flex-shrink: 0">{{ extractTime(item.node.ts) }}</n-text>
+                          </n-flex>
+                          <n-text
+                            v-if="normalizedNodeNavSearchText && item.matchDetails.length > 0"
+                            depth="3"
+                            class="node-nav-match-preview"
+                          >
+                            {{ formatNodeNavMatchPreview(item.matchDetails) }}
+                          </n-text>
                         </n-flex>
 
                         <!-- 树形模式：紧凑，带时间 -->
-                        <n-flex v-else align="center" style="gap: 4px">
-                          <span class="nav-status-dot" :class="getNodeNavDotClass(node.status)" />
-                          <n-text style="font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1">{{ node.name || '未命名节点' }}</n-text>
-                          <n-text depth="3" style="font-size: 10px; flex-shrink: 0">{{ extractTime(node.ts) }}</n-text>
+                        <n-flex v-else vertical style="gap: 2px">
+                          <n-flex align="center" style="gap: 4px">
+                            <span class="nav-status-dot" :class="getNodeNavDotClass(item.node.status)" />
+                            <n-text style="font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1">{{ item.node.name || '未命名节点' }}</n-text>
+                            <n-tag
+                              v-if="normalizedNodeNavSearchText && item.matchDetails.length > 0"
+                              size="tiny"
+                              type="info"
+                            >
+                              {{ formatNodeNavMatchHint(item.matchKinds) }}
+                            </n-tag>
+                            <n-text depth="3" style="font-size: 10px; flex-shrink: 0">{{ extractTime(item.node.ts) }}</n-text>
+                          </n-flex>
+                          <n-text
+                            v-if="normalizedNodeNavSearchText && item.matchDetails.length > 0"
+                            depth="3"
+                            class="node-nav-match-preview"
+                          >
+                            {{ formatNodeNavMatchPreview(item.matchDetails) }}
+                          </n-text>
                         </n-flex>
                       </n-list-item>
                     </n-list>
+                    <n-empty
+                      v-else
+                      :description="currentNodes.length > 0 ? '未找到匹配节点' : '暂无节点数据'"
+                      style="padding: 24px 0"
+                    />
                   </n-scrollbar>
+                  </div>
                 </n-card>
               </template>
 
@@ -1377,6 +1589,13 @@ const handleFlowItemClick = (node: NodeInfo, flowItemId: string) => {
 
 .nav-dot-failed {
   background: #d03050;
+}
+
+.node-nav-match-preview {
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .analysis-layout-shell {
