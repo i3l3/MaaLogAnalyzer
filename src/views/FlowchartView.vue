@@ -1175,11 +1175,17 @@ const onPaneClick = () => {
 }
 
 .popover-img {
+  display: block;
   max-width: 100%;
+  width: 100%;
   margin-top: 4px;
 }
 
 .popover-img :deep(img) {
+  display: block;
+  max-width: 100%;
+  width: 100%;
+  height: auto;
   border-radius: 4px;
 }
 

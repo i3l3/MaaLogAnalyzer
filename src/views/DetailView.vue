@@ -723,10 +723,16 @@ const copyToClipboard = (text: string) => {
 }
 
 .detail-preview-image {
+  display: block;
   max-width: 100%;
+  width: 100%;
 }
 
 .detail-preview-image :deep(img) {
+  display: block;
+  max-width: 100%;
+  width: 100%;
+  height: auto;
   border-radius: 4px;
 }
 
