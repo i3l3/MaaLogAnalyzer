@@ -133,8 +133,12 @@ const themeOverrides = computed<GlobalThemeOverrides>(() => {
 
   const primaryColor = pickCssVarColor(styleDecl, ['--vscode-button-background'], '#63e2b7')
   const primaryColorHover = pickCssVarColor(styleDecl, ['--vscode-button-hoverBackground'], '#7fe7c4')
-  const bodyColor = pickCssVarColor(styleDecl, ['--vscode-editor-background'], fallbackBg)
-  const widgetColor = pickCssVarColor(styleDecl, ['--vscode-editorWidget-background', '--vscode-editor-background'], bodyColor)
+  const bodyColor = pickCssVarColor(styleDecl, ['--vscode-panel-background'], fallbackBg)
+  const widgetColor = pickCssVarColor(
+    styleDecl,
+    ['--vscode-panel-background', '--vscode-editorWidget-background'],
+    bodyColor,
+  )
   const inputColor = pickCssVarColor(styleDecl, ['--vscode-input-background', '--vscode-editor-background'], bodyColor)
   const borderColor = pickCssVarColor(styleDecl, ['--vscode-panel-border', '--vscode-widget-border'], fallbackBorder)
   const textColor = pickCssVarColor(styleDecl, ['--vscode-editor-foreground'], fallbackText)

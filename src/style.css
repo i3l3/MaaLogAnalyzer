@@ -22,7 +22,7 @@ body {
 
 /* 滚动条样式 - 深色模式 */
 body {
-  background: var(--vscode-editor-background, #18181c);
+  background: var(--vscode-panel-background, #18181c);
   color: var(--vscode-editor-foreground, rgba(255, 255, 255, 0.82));
 }
 
@@ -47,7 +47,7 @@ body {
 /* 浅色模式 - 系统偏好 */
 @media (prefers-color-scheme: light) {
   body:not(.force-dark) {
-    background: var(--vscode-editor-background, #ffffff);
+    background: var(--vscode-panel-background, #ffffff);
     color: var(--vscode-editor-foreground, rgba(0, 0, 0, 0.82));
   }
   
@@ -62,7 +62,7 @@ body {
 
 /* 强制浅色模式 */
 body.force-light {
-  background: var(--vscode-editor-background, #ffffff) !important;
+  background: var(--vscode-panel-background, #ffffff) !important;
   color: var(--vscode-editor-foreground, rgba(0, 0, 0, 0.82)) !important;
 }
 
@@ -76,7 +76,7 @@ body.force-light ::-webkit-scrollbar-thumb:hover {
 
 /* 强制深色模式 */
 body.force-dark {
-  background: var(--vscode-editor-background, #18181c) !important;
+  background: var(--vscode-panel-background, #18181c) !important;
   color: var(--vscode-editor-foreground, rgba(255, 255, 255, 0.82)) !important;
 }
 
