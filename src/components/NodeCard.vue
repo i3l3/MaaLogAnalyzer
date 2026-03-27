@@ -115,17 +115,38 @@ const mergedRecognitionList = computed<MergedRecognitionItem[]>(() => {
     return result
   }
 
-  // 多轮识别：先按尝试序列切分轮次，再在轮内按 next_list 顺序展示。
+  const nextEntries = nextList.map((nextItem) => {
+    const prefixes: string[] = []
+    if (nextItem.anchor) prefixes.push('[Anchor]')
+    if (nextItem.jump_back) prefixes.push('[JumpBack]')
+    const displayName = prefixes.length > 0 ? `${prefixes.join('')} ${nextItem.name}` : nextItem.name
+    return {
+      name: nextItem.name,
+      displayName,
+    }
+  })
+
+  // next_list 为空时，保持原始尝试序列展示。
+  if (nextEntries.length === 0) {
+    attempts.forEach((attempt, index) => {
+      result.push({
+        name: attempt.name,
+        status: attempt.status,
+        attemptIndex: index,
+        attempt,
+        hasNestedNodes: !!(attempt.nested_nodes && attempt.nested_nodes.length > 0),
+      })
+    })
+    return result
+  }
+
+  // 多轮识别：先按尝试序列切分轮次，再在轮内按 next_list 顺序全量展示。
   const nextIndexMap = new Map<string, number>()
   const nextDisplayMap = new Map<string, string>()
-  nextList.forEach((nextItem, idx) => {
-    if (!nextIndexMap.has(nextItem.name)) {
-      nextIndexMap.set(nextItem.name, idx)
-      const prefixes: string[] = []
-      if (nextItem.anchor) prefixes.push('[Anchor]')
-      if (nextItem.jump_back) prefixes.push('[JumpBack]')
-      const displayName = prefixes.length > 0 ? `${prefixes.join('')} ${nextItem.name}` : nextItem.name
-      nextDisplayMap.set(nextItem.name, displayName)
+  nextEntries.forEach((nextEntry, idx) => {
+    if (!nextIndexMap.has(nextEntry.name)) {
+      nextIndexMap.set(nextEntry.name, idx)
+      nextDisplayMap.set(nextEntry.name, nextEntry.displayName)
     }
   })
 
@@ -175,27 +196,90 @@ const mergedRecognitionList = computed<MergedRecognitionItem[]>(() => {
       })
     }
 
-    const ordered = [...roundAttempts].sort((a, b) => {
-      const ai = nextIndexMap.get(a.attempt.name)
-      const bi = nextIndexMap.get(b.attempt.name)
-      const aOrder = ai == null ? Number.MAX_SAFE_INTEGER : ai
-      const bOrder = bi == null ? Number.MAX_SAFE_INTEGER : bi
-      if (aOrder !== bOrder) return aOrder - bOrder
-      return a.index - b.index
+    const roundBuckets = new Map<string, RoundAttempt[]>()
+    const outOfNextList: RoundAttempt[] = []
+
+    roundAttempts.forEach((roundAttempt) => {
+      const bucket = roundBuckets.get(roundAttempt.attempt.name)
+      if (bucket) {
+        bucket.push(roundAttempt)
+        return
+      }
+      if (nextIndexMap.has(roundAttempt.attempt.name)) {
+        roundBuckets.set(roundAttempt.attempt.name, [roundAttempt])
+      } else {
+        outOfNextList.push(roundAttempt)
+      }
     })
 
-    ordered.forEach(({ attempt, index }) => {
+    nextEntries.forEach((nextEntry) => {
+      const bucket = roundBuckets.get(nextEntry.name)
+      const matched = bucket?.shift()
+      if (matched) {
+        result.push({
+          name: nextEntry.displayName,
+          status: matched.attempt.status,
+          attemptIndex: matched.index,
+          attempt: matched.attempt,
+          hasNestedNodes: !!(matched.attempt.nested_nodes && matched.attempt.nested_nodes.length > 0),
+        })
+      } else {
+        result.push({
+          name: nextEntry.displayName,
+          status: 'not-recognized',
+        })
+      }
+    })
+
+    const remainingMatched = [...roundBuckets.values()].flat()
+    const tail = [...outOfNextList, ...remainingMatched].sort((a, b) => a.index - b.index)
+    tail.forEach(({ attempt, index }) => {
       const name = nextDisplayMap.get(attempt.name) ?? attempt.name
       result.push({
         name,
         status: attempt.status,
         attemptIndex: index,
         attempt,
-        hasNestedNodes: !!(attempt.nested_nodes && attempt.nested_nodes.length > 0)
+        hasNestedNodes: !!(attempt.nested_nodes && attempt.nested_nodes.length > 0),
       })
     })
   })
 
+  return result
+})
+
+const visibleRecognitionList = computed<MergedRecognitionItem[]>(() => {
+  const source = mergedRecognitionList.value
+  if (settings.showNotRecognizedNodes) return source
+
+  const hasRoundSeparators = source.some(item => item.isRoundSeparator)
+  if (!hasRoundSeparators) {
+    return source.filter(item => item.status !== 'not-recognized')
+  }
+
+  const result: MergedRecognitionItem[] = []
+  let currentSeparator: MergedRecognitionItem | null = null
+  let currentVisibleItems: MergedRecognitionItem[] = []
+
+  const flushRound = () => {
+    if (currentVisibleItems.length === 0) return
+    if (currentSeparator) result.push(currentSeparator)
+    result.push(...currentVisibleItems)
+  }
+
+  source.forEach((item) => {
+    if (item.isRoundSeparator) {
+      flushRound()
+      currentSeparator = item
+      currentVisibleItems = []
+      return
+    }
+    if (item.status !== 'not-recognized') {
+      currentVisibleItems.push(item)
+    }
+  })
+
+  flushRound()
   return result
 })
 
@@ -267,7 +351,7 @@ const actionButtonType = computed<ButtonType>(() => {
         <node-card-detailed
           v-if="settings.displayMode === 'detailed'"
           :node="node"
-          :merged-recognition-list="mergedRecognitionList"
+          :merged-recognition-list="visibleRecognitionList"
           :is-vscode-launch-embed="isVscodeLaunchEmbed"
           :bridge-request-task-doc="bridgeRequestTaskDoc"
           :recognition-expanded="effectiveRecognitionExpanded"
@@ -288,7 +372,7 @@ const actionButtonType = computed<ButtonType>(() => {
         <node-card-compact
           v-else-if="settings.displayMode === 'compact'"
           :node="node"
-          :merged-recognition-list="mergedRecognitionList"
+          :merged-recognition-list="visibleRecognitionList"
           :is-vscode-launch-embed="isVscodeLaunchEmbed"
           :bridge-request-task-doc="bridgeRequestTaskDoc"
           @select-action="emit('select-action', $event)"
@@ -298,7 +382,7 @@ const actionButtonType = computed<ButtonType>(() => {
         <node-card-tree
           v-else
           :node="node"
-          :merged-recognition-list="mergedRecognitionList"
+          :merged-recognition-list="visibleRecognitionList"
           :is-vscode-launch-embed="isVscodeLaunchEmbed"
           :bridge-request-task-doc="bridgeRequestTaskDoc"
           :recognition-expanded="effectiveRecognitionExpanded"

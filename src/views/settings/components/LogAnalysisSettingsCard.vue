@@ -29,6 +29,11 @@ const props = defineProps<{
             </n-radio-group>
           </td>
         </tr>
+        
+        <tr>
+          <td>显示未识别节点</td>
+          <td><n-switch v-model:value="props.settings.showNotRecognizedNodes" /></td>
+        </tr>
 
         <tr v-if="props.settings.displayMode === 'detailed' || props.settings.displayMode === 'tree'">
           <td>默认折叠根部识别列表</td>

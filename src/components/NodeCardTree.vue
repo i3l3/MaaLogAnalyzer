@@ -145,6 +145,9 @@ const recognitionNodeShortLabel = getFlowItemShortLabel('recognition_node')
               disabled
               style="opacity: 0.5"
             >
+              <template #icon>
+                <close-circle-outlined />
+              </template>
               {{ item.name }}
             </n-button>
             <task-doc-hover-popover

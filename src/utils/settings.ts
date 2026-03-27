@@ -8,6 +8,8 @@ export type DisplayMode = 'detailed' | 'compact' | 'tree'
 export type FlowchartEdgeStyle = 'orthogonal' | 'default'
 
 export interface AppSettings {
+  // 是否显示未识别节点（next_list 中未命中的占位项）
+  showNotRecognizedNodes: boolean
   // 默认折叠根部识别列表
   defaultCollapseRecognition: boolean
   // 默认折叠识别中嵌套的识别节点
@@ -36,6 +38,7 @@ export interface AppSettings {
 const SETTINGS_KEY = 'maa-log-analyzer-settings'
 
 const defaultSettings: AppSettings = {
+  showNotRecognizedNodes: true,
   defaultCollapseRecognition: false,
   defaultCollapseNestedRecognition: true,
   defaultCollapseNestedActionNodes: true,

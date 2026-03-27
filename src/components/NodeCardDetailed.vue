@@ -119,6 +119,9 @@ const recognitionNodeShortLabel = getFlowItemShortLabel('recognition_node')
             disabled
             style="align-self: flex-start; opacity: 0.5"
           >
+            <template #icon>
+              <close-circle-outlined />
+            </template>
             {{ item.name }}
           </n-button>
 
