@@ -307,17 +307,12 @@ export const buildNodeActionTimelineItems = (node: NodeInfo): UnifiedFlowItem[] 
   const nodeFlowItems = buildNodeFlowItems(node)
   const actionRootFromFlow = nodeFlowItems.find(item => item.type === 'action') || null
   const actionRootItem = actionRootFromFlow ?? buildFallbackActionRootItem(node)
-  const actionFlowItems = sortFlowItems(actionRootFromFlow?.children ?? []).map(sortFlowTree)
   const waitFreezesItems = nodeFlowItems.filter(item => item.type === 'wait_freezes')
 
   const timelineItems: UnifiedFlowItem[] = []
   if (actionRootItem) {
-    timelineItems.push({
-      ...actionRootItem,
-      children: undefined,
-    })
+    timelineItems.push(sortFlowTree(actionRootItem))
   }
-  timelineItems.push(...actionFlowItems)
   timelineItems.push(...waitFreezesItems)
 
   return sortActionTimelineItems(timelineItems).map(sortFlowTree)

@@ -91,6 +91,7 @@ export interface NestedActionNode {
   reco_details?: RecognitionDetail
   action_details?: ActionDetail
   recognitions?: RecognitionAttempt[]
+  child_tasks?: NestedActionGroup[]
 }
 
 // 节点信息
