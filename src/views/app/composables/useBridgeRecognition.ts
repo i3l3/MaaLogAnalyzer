@@ -10,7 +10,8 @@ import { resolveBridgeRecognitionImages } from './bridgeRecognition/resolve'
 export interface SelectedRecognitionQueryTarget {
   sessionId: string
   taskId: number
-  recoId: number
+  recoIds: number[]
+  sourceType: 'recognition' | 'wait_freezes'
 }
 
 interface UseBridgeRecognitionOptions {
@@ -65,39 +66,65 @@ export const useBridgeRecognition = (options: UseBridgeRecognitionOptions) => {
     bridgeRecognitionImages.value = null
 
     try {
-      const recoResult = await queryBridgeDetail({
-        sessionId: target.sessionId,
-        target: 'reco',
-        id: target.recoId,
-        taskId: target.taskId,
-        task_id: target.taskId,
-      })
+      const aggregateRefs: BridgeCachedImageRefs = {
+        raw: null,
+        draws: [],
+      }
+      let aggregateRaw: string | null = null
+      const aggregateDraws: string[] = []
+      let requestedRaw = false
+      let requestedDrawCount = 0
+
+      for (const recoId of target.recoIds) {
+        const recoResult = await queryBridgeDetail({
+          sessionId: target.sessionId,
+          target: 'reco',
+          id: recoId,
+          taskId: target.taskId,
+          task_id: target.taskId,
+        })
+
+        if (requestToken !== bridgeRecoLoadToken) return
+
+        const {
+          refs,
+          raw,
+          draws: resolvedDraws,
+          requestedRaw: oneRequestedRaw,
+          requestedDrawCount: oneRequestedDrawCount,
+        } = await resolveBridgeRecognitionImages({
+          recoData: recoResult.data,
+          sessionId: target.sessionId,
+          taskId: target.taskId,
+          loadCachedImageDataUrl,
+        })
+
+        if (aggregateRefs.raw == null && refs.raw != null) {
+          aggregateRefs.raw = refs.raw
+        }
+        if (aggregateRaw == null && raw) {
+          aggregateRaw = raw
+        }
+        if (refs.draws.length > 0) {
+          aggregateRefs.draws.push(...refs.draws)
+        }
+        if (resolvedDraws.length > 0) {
+          aggregateDraws.push(...resolvedDraws)
+        }
+        requestedRaw = requestedRaw || oneRequestedRaw
+        requestedDrawCount += oneRequestedDrawCount
+      }
 
       if (requestToken !== bridgeRecoLoadToken) return
-
-      const {
-        refs,
-        raw,
-        draws: resolvedDraws,
-        requestedRaw,
-        requestedDrawCount,
-      } = await resolveBridgeRecognitionImages({
-        recoData: recoResult.data,
-        sessionId: target.sessionId,
-        taskId: target.taskId,
-        loadCachedImageDataUrl,
-      })
-
-      if (requestToken !== bridgeRecoLoadToken) return
-      bridgeRecognitionImageRefs.value = refs
+      bridgeRecognitionImageRefs.value = aggregateRefs
       bridgeRecognitionImages.value = {
-        raw,
-        draws: resolvedDraws,
+        raw: aggregateRaw,
+        draws: aggregateDraws,
       }
       if (!bridgeRecognitionError.value) {
-        if (requestedRaw && !raw && requestedDrawCount === 0) {
+        if (requestedRaw && !aggregateRaw && requestedDrawCount === 0) {
           bridgeRecognitionError.value = '识别图片为空（dataUrl 没有内容）'
-        } else if (requestedDrawCount > 0 && resolvedDraws.length === 0 && !raw) {
+        } else if (requestedDrawCount > 0 && aggregateDraws.length === 0 && !aggregateRaw) {
           bridgeRecognitionError.value = '识别图片为空（raw/draw 都没有有效内容）'
         }
       }

@@ -16,7 +16,7 @@ export const useBridgeDetailLoaders = (options: UseBridgeDetailLoadersOptions) =
   const bridgeRecognitionQueryKey = computed(() => {
     const target = options.getSelectedRecognitionTarget()
     if (!target) return ''
-    return `${target.sessionId}:${target.taskId}:${target.recoId}`
+    return `${target.sessionId}:${target.taskId}:${target.sourceType}:${target.recoIds.join(',')}`
   })
 
   watch(bridgeRecognitionQueryKey, () => {

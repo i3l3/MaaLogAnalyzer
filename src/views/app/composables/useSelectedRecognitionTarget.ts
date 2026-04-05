@@ -25,15 +25,35 @@ export const useSelectedRecognitionTarget = (options: UseSelectedRecognitionTarg
 
     const selectedFlowItem = options.flattenFlowItems(options.buildNodeFlowItems(node)).find(item => item.id === flowItemId)
     if (!selectedFlowItem) return null
-    if (selectedFlowItem.type !== 'recognition' && selectedFlowItem.type !== 'recognition_node') return null
-
-    const recoId = options.toPositiveInteger(selectedFlowItem.reco_id ?? selectedFlowItem.reco_details?.reco_id)
-    if (recoId == null) return null
 
     const taskId = options.toPositiveInteger(selectedFlowItem.task_id ?? node.task_id)
     if (taskId == null) return null
 
-    return { sessionId, taskId, recoId }
+    if (selectedFlowItem.type === 'recognition' || selectedFlowItem.type === 'recognition_node') {
+      const recoId = options.toPositiveInteger(selectedFlowItem.reco_id ?? selectedFlowItem.reco_details?.reco_id)
+      if (recoId == null) return null
+      return {
+        sessionId,
+        taskId,
+        recoIds: [recoId],
+        sourceType: 'recognition',
+      }
+    }
+
+    if (selectedFlowItem.type === 'wait_freezes') {
+      const recoIds = (selectedFlowItem.wait_freezes_details?.reco_ids ?? [])
+        .map(id => options.toPositiveInteger(id))
+        .filter((id): id is number => id != null)
+      if (recoIds.length === 0) return null
+      return {
+        sessionId,
+        taskId,
+        recoIds,
+        sourceType: 'wait_freezes',
+      }
+    }
+
+    return null
   }
 
   return {

@@ -13,6 +13,9 @@ const props = defineProps<{
   selectedFlowExecutionTime: string
   descriptionColumns: number
   selectedFlowErrorImage: string | null
+  bridgeRecognitionDrawImages?: string[]
+  bridgeRecognitionLoading?: boolean
+  bridgeRecognitionError?: string | null
   getFlowTypeLabel: (type: UnifiedFlowItem['type']) => string
   rawJsonDefaultExpanded: string[]
   resolveImageSrc: (source: string) => string
@@ -73,6 +76,37 @@ const props = defineProps<{
         <safe-preview-image
           v-for="(img, idx) in props.selectedFlowItem.wait_freezes_details.images"
           :key="`wf-img-${idx}`"
+          :src="props.resolveImageSrc(img)"
+          class="detail-preview-image"
+        />
+      </n-flex>
+    </div>
+
+    <div
+      v-if="props.selectedFlowItem.type === 'wait_freezes' && props.bridgeRecognitionLoading"
+      style="margin-top: 12px"
+    >
+      <n-text depth="3" style="font-size: 13px">正在加载 Wait Freezes 调试图...</n-text>
+    </div>
+
+    <div
+      v-if="props.selectedFlowItem.type === 'wait_freezes' && props.bridgeRecognitionError"
+      style="margin-top: 12px"
+    >
+      <n-text type="error" style="font-size: 13px">{{ props.bridgeRecognitionError }}</n-text>
+    </div>
+
+    <div
+      v-if="props.selectedFlowItem.type === 'wait_freezes' && props.bridgeRecognitionDrawImages && props.bridgeRecognitionDrawImages.length > 0"
+      style="margin-top: 12px"
+    >
+      <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">
+        Wait Freezes Draw ({{ props.bridgeRecognitionDrawImages.length }})
+      </n-text>
+      <n-flex vertical style="gap: 8px">
+        <safe-preview-image
+          v-for="(img, idx) in props.bridgeRecognitionDrawImages"
+          :key="`wf-bridge-draw-${idx}`"
           :src="props.resolveImageSrc(img)"
           class="detail-preview-image"
         />
