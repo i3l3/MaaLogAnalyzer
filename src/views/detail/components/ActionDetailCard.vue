@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import {
   NCard, NDescriptions, NDescriptionsItem, NTag,
-  NText, NFlex, NCollapse, NCollapseItem, NButton, NIcon, NCode, NImage,
+  NText, NFlex, NCollapse, NCollapseItem, NButton, NIcon, NCode,
 } from 'naive-ui'
 import { CopyOutlined } from '@vicons/antd'
 import type { NodeInfo } from '../../../types'
 import { getRuntimeStatusTagType, getRuntimeStatusText } from '../../../utils/runtimeStatus'
+import SafePreviewImage from '../../../components/SafePreviewImage.vue'
 
 const props = defineProps<{
   currentActionDetails: any
@@ -61,7 +62,7 @@ const props = defineProps<{
     <div v-if="props.selectedNode?.wait_freezes_images?.length" style="margin-top: 12px">
       <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">Wait Freezes 截图 ({{ props.selectedNode.wait_freezes_images.length }})</n-text>
       <n-flex vertical style="gap: 8px">
-        <n-image
+        <safe-preview-image
           v-for="(img, idx) in props.selectedNode.wait_freezes_images"
           :key="idx"
           :src="props.resolveImageSrc(img)"
@@ -72,7 +73,7 @@ const props = defineProps<{
 
     <div v-if="props.currentActionStatus === 'failed' && props.actionErrorImage" style="margin-top: 12px">
       <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">失败截图</n-text>
-      <n-image
+      <safe-preview-image
         :src="props.resolveImageSrc(props.actionErrorImage)"
         class="detail-preview-image"
       />

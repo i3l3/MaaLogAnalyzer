@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { NCard, NButton, NFlex, NImage, NText } from 'naive-ui'
+import { NCard, NButton, NFlex, NText } from 'naive-ui'
 import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@vicons/antd'
 import type { NodeInfo, MergedRecognitionItem } from '../types'
 import { isTauri } from '../utils/platform'
@@ -8,6 +8,7 @@ import { buildNodeActionRootItem } from '../utils/nodeFlow'
 import { getFlowItemButtonType, getFlowItemShortLabel } from '../utils/flowLabels'
 import { flattenFlowItems, flattenNestedRecognitionNodes } from '../utils/flowTree'
 import TaskDocHoverPopover from './TaskDocHoverPopover.vue'
+import SafePreviewImage from './SafePreviewImage.vue'
 
 const convertFileSrc = (filePath: string) => {
   if (!isTauri()) return filePath
@@ -178,13 +179,13 @@ const getRecognitionItemKey = (item: MergedRecognitionItem, idx: number): string
               vertical
               style="gap: 8px; align-self: flex-start"
             >
-              <n-image
+              <safe-preview-image
                 v-if="item.attempt?.vision_image"
                 :src="convertFileSrc(item.attempt.vision_image)"
                 width="200"
                 style="border-radius: 4px"
               />
-              <n-image
+              <safe-preview-image
                 v-if="item.attempt?.error_image"
                 :src="convertFileSrc(item.attempt.error_image)"
                 width="200"
@@ -252,13 +253,13 @@ const getRecognitionItemKey = (item: MergedRecognitionItem, idx: number): string
                   style="gap: 8px"
                   :style="{ marginLeft: `${nested.depth * DETAIL_INDENT_PX + 24}px` }"
                 >
-                  <n-image
+                  <safe-preview-image
                     v-if="nested.attempt.vision_image"
                     :src="convertFileSrc(nested.attempt.vision_image)"
                     width="180"
                     style="border-radius: 4px"
                   />
-                  <n-image
+                  <safe-preview-image
                     v-if="nested.attempt.error_image"
                     :src="convertFileSrc(nested.attempt.error_image)"
                     width="180"

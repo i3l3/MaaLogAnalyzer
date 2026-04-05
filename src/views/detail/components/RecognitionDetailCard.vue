@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import {
   NCard, NFlex, NDescriptions, NDescriptionsItem, NTag,
-  NText, NImage, NCollapse, NCollapseItem, NButton, NIcon, NCode,
+  NText, NCollapse, NCollapseItem, NButton, NIcon, NCode,
 } from 'naive-ui'
 import { CopyOutlined } from '@vicons/antd'
 import type { UnifiedFlowItem } from '../../../types'
+import SafePreviewImage from '../../../components/SafePreviewImage.vue'
 
 const props = defineProps<{
   currentRecognition: any
@@ -72,12 +73,12 @@ const props = defineProps<{
 
     <div v-if="props.currentAttempt?.vision_image" style="margin-top: 12px">
       <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">调试截图</n-text>
-      <n-image :src="props.resolveImageSrc(props.currentAttempt.vision_image)" class="detail-preview-image" />
+      <safe-preview-image :src="props.resolveImageSrc(props.currentAttempt.vision_image)" class="detail-preview-image" />
     </div>
 
     <div v-if="props.currentAttempt?.error_image" style="margin-top: 12px">
       <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">错误截图</n-text>
-      <n-image :src="props.resolveImageSrc(props.currentAttempt.error_image)" class="detail-preview-image" />
+      <safe-preview-image :src="props.resolveImageSrc(props.currentAttempt.error_image)" class="detail-preview-image" />
     </div>
 
     <div v-if="props.bridgeRecognitionLoading" style="margin-top: 12px">
@@ -91,7 +92,7 @@ const props = defineProps<{
     <div v-if="props.bridgeRecognitionDrawImages.length > 0" style="margin-top: 12px">
       <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">Draw ({{ props.bridgeRecognitionDrawImages.length }})</n-text>
       <n-flex vertical style="gap: 8px">
-        <n-image
+        <safe-preview-image
           v-for="(img, idx) in props.bridgeRecognitionDrawImages"
           :key="`${idx}-${img.slice(0, 24)}`"
           :src="props.resolveImageSrc(img)"
@@ -102,7 +103,7 @@ const props = defineProps<{
 
     <div v-if="props.bridgeRecognitionRawImage" style="margin-top: 12px">
       <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">Raw</n-text>
-      <n-image :src="props.resolveImageSrc(props.bridgeRecognitionRawImage)" class="detail-preview-image" />
+      <safe-preview-image :src="props.resolveImageSrc(props.bridgeRecognitionRawImage)" class="detail-preview-image" />
     </div>
 
     <n-collapse style="margin-top: 16px" :default-expanded-names="props.rawJsonDefaultExpanded">

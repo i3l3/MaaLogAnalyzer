@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { NTag, NImage } from 'naive-ui'
+import { NTag } from 'naive-ui'
 import type { NodeInfo } from '../../../types'
 import { convertFileSrc } from '../utils/nodeImageLookup'
+import SafePreviewImage from '../../../components/SafePreviewImage.vue'
 
 interface FlowchartPopoverData {
   label: string
@@ -63,7 +64,7 @@ const emit = defineEmits<{
             {{ info.status === 'running' ? getRuntimeStatusText(info.status) : info.action_details.success ? '成功' : '失败' }}
           </n-tag>
         </div>
-        <n-image
+        <safe-preview-image
           v-if="nodeImageMap.get(info.node_id)"
           :src="convertFileSrc(nodeImageMap.get(info.node_id)!)"
           class="popover-img"

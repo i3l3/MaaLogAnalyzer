@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import {
   NCard, NDescriptions, NDescriptionsItem, NFlex, NTag,
-  NCollapse, NCollapseItem, NButton, NIcon, NCode, NImage, NText,
+  NCollapse, NCollapseItem, NButton, NIcon, NCode, NText,
 } from 'naive-ui'
 import { CopyOutlined } from '@vicons/antd'
 import type { UnifiedFlowItem } from '../../../types'
 import { getRuntimeStatusTagType, getRuntimeStatusText } from '../../../utils/runtimeStatus'
+import SafePreviewImage from '../../../components/SafePreviewImage.vue'
 
 const props = defineProps<{
   selectedFlowItem: UnifiedFlowItem | null
@@ -58,7 +59,7 @@ const props = defineProps<{
 
     <div v-if="props.selectedFlowErrorImage" style="margin-top: 12px">
       <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">错误截图</n-text>
-      <n-image :src="props.resolveImageSrc(props.selectedFlowErrorImage)" class="detail-preview-image" />
+      <safe-preview-image :src="props.resolveImageSrc(props.selectedFlowErrorImage)" class="detail-preview-image" />
     </div>
 
     <n-collapse style="margin-top: 16px" :default-expanded-names="props.rawJsonDefaultExpanded">

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import {
   NCard, NDescriptions, NDescriptionsItem, NFlex, NTag, NIcon, NText,
-  NCollapse, NCollapseItem, NButton, NCode, NEmpty, NImage,
+  NCollapse, NCollapseItem, NButton, NCode, NEmpty,
 } from 'naive-ui'
 import { CopyOutlined } from '@vicons/antd'
 import type { NodeInfo } from '../../../types'
+import SafePreviewImage from '../../../components/SafePreviewImage.vue'
 
 const props = defineProps<{
   selectedNode: NodeInfo | null
@@ -81,7 +82,7 @@ const props = defineProps<{
 
     <div v-if="props.nodeErrorImage" style="margin-top: 12px">
       <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">节点截图</n-text>
-      <n-image
+      <safe-preview-image
         :src="props.resolveImageSrc(props.nodeErrorImage)"
         class="detail-preview-image"
       />
