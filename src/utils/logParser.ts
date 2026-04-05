@@ -7,6 +7,7 @@ import type {
   NestedActionGroup,
   NestedActionNode,
   UnifiedFlowItem,
+  WaitFreezesDetail,
 } from '../types'
 import { StringPool } from './stringPool'
 import { buildActionFlowItems, buildRecognitionFlowItems } from './nodeFlow'
@@ -48,7 +49,7 @@ const formatEventTimestampMs = (timestampMs: number): string => {
 type MaaDomain = 'Resource' | 'Controller' | 'Tasker' | 'Node' | 'Unknown'
 type MaaPhase = 'Starting' | 'Succeeded' | 'Failed' | 'Unknown'
 type MaaTaskerKind = 'Task' | 'Unknown'
-type MaaNodeKind = 'PipelineNode' | 'RecognitionNode' | 'ActionNode' | 'NextList' | 'Recognition' | 'Action' | 'Unknown'
+type MaaNodeKind = 'PipelineNode' | 'RecognitionNode' | 'ActionNode' | 'NextList' | 'Recognition' | 'Action' | 'WaitFreezes' | 'Unknown'
 
 interface MaaMessageMeta {
   domain: MaaDomain
@@ -92,6 +93,7 @@ const normalizeMaaNodeKind = (value: string): MaaNodeKind => {
     case 'NextList':
     case 'Recognition':
     case 'Action':
+    case 'WaitFreezes':
       return value
     default:
       return 'Unknown'
@@ -538,7 +540,7 @@ export class LogParser {
     }
   }
 
-  private compactTaskEventDetails(details: Record<string, any>): Record<string, any> {
+  private compactTaskEventDetails(message: string, details: Record<string, any>): Record<string, any> {
     const compact: Record<string, any> = {}
 
     if (typeof details.task_id === 'number') compact.task_id = details.task_id
@@ -555,6 +557,49 @@ export class LogParser {
     if (typeof details.hash === 'string') compact.hash = this.stringPool.intern(details.hash)
     if (typeof details.action === 'string') compact.action = this.stringPool.intern(details.action)
     if (typeof details.anchor === 'string') compact.anchor = this.stringPool.intern(details.anchor)
+
+    if (message.startsWith('Node.WaitFreezes.')) {
+      if (typeof details.wf_id === 'number') compact.wf_id = details.wf_id
+      if (typeof details.phase === 'string') compact.phase = this.stringPool.intern(details.phase)
+      if (typeof details.elapsed === 'number') compact.elapsed = details.elapsed
+      if (Object.prototype.hasOwnProperty.call(details, 'focus')) {
+        const rawFocus = details.focus
+        compact.focus = (rawFocus != null && typeof rawFocus === 'object')
+          ? markRaw(rawFocus)
+          : rawFocus
+      }
+
+      if (Array.isArray(details.reco_ids)) {
+        const recoIds = details.reco_ids
+          .map((item: unknown) => typeof item === 'number' ? item : Number(item))
+          .filter((item: number) => Number.isFinite(item))
+        if (recoIds.length > 0) {
+          compact.reco_ids = markRaw(recoIds)
+        }
+      }
+
+      if (Array.isArray(details.roi) && details.roi.length === 4) {
+        const roi = details.roi
+          .map((item: unknown) => typeof item === 'number' ? item : Number(item))
+          .filter((item: number) => Number.isFinite(item))
+        if (roi.length === 4) {
+          compact.roi = markRaw(roi)
+        }
+      }
+
+      if (details.param && typeof details.param === 'object') {
+        const rawParam = details.param as Record<string, unknown>
+        const param: Record<string, unknown> = {}
+        if (typeof rawParam.method === 'number') param.method = rawParam.method
+        if (typeof rawParam.rate_limit === 'number') param.rate_limit = rawParam.rate_limit
+        if (typeof rawParam.threshold === 'number') param.threshold = rawParam.threshold
+        if (typeof rawParam.time === 'number') param.time = rawParam.time
+        if (typeof rawParam.timeout === 'number') param.timeout = rawParam.timeout
+        if (Object.keys(param).length > 0) {
+          compact.param = markRaw(param)
+        }
+      }
+    }
 
     if (Array.isArray(details.list)) {
       const list = details.list
@@ -665,7 +710,7 @@ export class LogParser {
             timestamp: event.timestamp,
             level: event.level,
             message: event.message,
-            details: this.compactTaskEventDetails(event.details ?? {}),
+            details: this.compactTaskEventDetails(event.message, event.details ?? {}),
             _lineNumber: event._lineNumber,
           }))
       }
@@ -727,6 +772,21 @@ export class LogParser {
       start_details?: Record<string, any>
       end_details?: Record<string, any>
     }
+    type WaitFreezesRuntimeState = {
+      wf_id: number
+      name: string
+      phase?: string
+      ts: string
+      end_ts?: string
+      status: 'running' | 'success' | 'failed'
+      elapsed?: number
+      reco_ids?: number[]
+      roi?: [number, number, number, number]
+      param?: WaitFreezesDetail['param']
+      focus?: any
+      images?: string[]
+      order: number
+    }
 
     // 当前节点的累积状态
     let currentNextList: any[] = []
@@ -749,6 +809,7 @@ export class LogParser {
       status: 'running' | 'success' | 'failed'
       order: number
     }>()
+    const waitFreezesRuntimeStates = new Map<number, WaitFreezesRuntimeState>()
     const activeSubTaskActionNodes = new Map<string, NestedActionNode>()
     const subTaskPipelineNodeStartTimes = new Map<string, string>()
     const subTaskRecognitionNodeStartTimes = new Map<string, string>()
@@ -791,6 +852,108 @@ export class LogParser {
       const trimmed = details.anchor.trim()
       if (!trimmed) return undefined
       return this.stringPool.intern(trimmed)
+    }
+    const resolveEventFocus = (details: Record<string, any>, fallback?: NodeInfo['focus']) => {
+      if (!Object.prototype.hasOwnProperty.call(details, 'focus')) return fallback
+      if (details.focus == null) return fallback
+      return markRaw(details.focus)
+    }
+    const normalizeWaitFreezesId = (value: unknown): number | null => {
+      const wfId = typeof value === 'number' ? value : Number(value)
+      return Number.isFinite(wfId) ? wfId : null
+    }
+    const normalizeNumericArray = (value: unknown): number[] | undefined => {
+      if (!Array.isArray(value)) return undefined
+      const normalized = value
+        .map((item: unknown) => typeof item === 'number' ? item : Number(item))
+        .filter((item: number) => Number.isFinite(item))
+      return normalized.length > 0 ? normalized : undefined
+    }
+    const parseWaitFreezesRoi = (value: unknown): [number, number, number, number] | undefined => {
+      const normalized = normalizeNumericArray(value)
+      if (!normalized || normalized.length !== 4) return undefined
+      return [normalized[0], normalized[1], normalized[2], normalized[3]]
+    }
+    const parseWaitFreezesParam = (value: unknown): WaitFreezesDetail['param'] | undefined => {
+      if (!value || typeof value !== 'object') return undefined
+      const raw = value as Record<string, unknown>
+      const param: WaitFreezesDetail['param'] = {}
+      if (typeof raw.method === 'number') param.method = raw.method
+      if (typeof raw.rate_limit === 'number') param.rate_limit = raw.rate_limit
+      if (typeof raw.threshold === 'number') param.threshold = raw.threshold
+      if (typeof raw.time === 'number') param.time = raw.time
+      if (typeof raw.timeout === 'number') param.timeout = raw.timeout
+      return Object.keys(param).length > 0 ? param : undefined
+    }
+    const toWaitFreezesFlowItem = (state: WaitFreezesRuntimeState): UnifiedFlowItem => {
+      return {
+        id: `node.wait_freezes.${state.wf_id}`,
+        type: 'wait_freezes',
+        name: state.name || 'WaitFreezes',
+        status: state.status,
+        ts: state.ts,
+        end_ts: state.end_ts,
+        wait_freezes_details: markRaw({
+          wf_id: state.wf_id,
+          phase: state.phase,
+          elapsed: state.elapsed,
+          reco_ids: state.reco_ids,
+          roi: state.roi,
+          param: state.param,
+          focus: state.focus,
+          images: state.images,
+        }),
+      }
+    }
+    const buildWaitFreezesFlowItems = (): UnifiedFlowItem[] => {
+      return Array.from(waitFreezesRuntimeStates.values())
+        .sort((a, b) => {
+          const delta = a.order - b.order
+          if (delta !== 0) return delta
+          return a.wf_id - b.wf_id
+        })
+        .map(toWaitFreezesFlowItem)
+    }
+    const upsertWaitFreezesState = (
+      details: Record<string, any>,
+      timestamp: string,
+      status: 'running' | 'success' | 'failed',
+      eventOrder: number
+    ) => {
+      const wfId = normalizeWaitFreezesId(details.wf_id)
+      if (wfId == null) return
+
+      const existing = waitFreezesRuntimeStates.get(wfId)
+      const nowTs = this.stringPool.intern(timestamp)
+      const fallbackName = (typeof details.name === 'string' && details.name.trim())
+        ? details.name
+        : existing?.name
+      const activeNodeName = getActivePipelineNode()?.name
+      const name = this.stringPool.intern(fallbackName || activeNodeName || 'WaitFreezes')
+      const rawPhase = typeof details.phase === 'string' ? details.phase.trim() : ''
+      const phase = rawPhase ? this.stringPool.intern(rawPhase) : existing?.phase
+      const elapsed = typeof details.elapsed === 'number' ? details.elapsed : existing?.elapsed
+      const recoIds = normalizeNumericArray(details.reco_ids) ?? existing?.reco_ids
+      const roi = parseWaitFreezesRoi(details.roi) ?? existing?.roi
+      const param = parseWaitFreezesParam(details.param) ?? existing?.param
+      const focus = resolveEventFocus(details, existing?.focus)
+      const images = this.findWaitFreezesImages(timestamp, name) ?? existing?.images
+
+      waitFreezesRuntimeStates.set(wfId, {
+        wf_id: wfId,
+        name,
+        phase,
+        ts: existing?.ts || nowTs,
+        end_ts: status === 'running' ? (existing?.end_ts || nowTs) : nowTs,
+        status,
+        elapsed,
+        reco_ids: recoIds,
+        roi,
+        param,
+        focus,
+        images,
+        order: existing?.order ?? eventOrder,
+      })
     }
     const markRawTaskDetails = (details: Record<string, any> | undefined): Record<string, any> | undefined => {
       if (!details) return undefined
@@ -1292,6 +1455,7 @@ export class LogParser {
         : []
 
       const recognitionFlow = buildRecognitionFlowItems(topLevelRecognitions)
+      const waitFreezesFlow = buildWaitFreezesFlowItems()
       const actionFlow = buildActionFlowItems(actionRecognitions, runtimeNestedActionGroups)
       const runtimeActionState = getLatestActionRuntimeState()
       const inferredActionStatus = summarizeActionFlowStatus(actionFlow)
@@ -1329,9 +1493,11 @@ export class LogParser {
           }
         : null
 
-      activeNode.node_flow = actionRoot
-        ? [...recognitionFlow, actionRoot]
-        : recognitionFlow
+      activeNode.node_flow = [
+        ...recognitionFlow,
+        ...waitFreezesFlow,
+        ...(actionRoot ? [actionRoot] : []),
+      ]
 
       const fallbackRecoDetails =
         topLevelRecognitions.length > 0
@@ -1357,6 +1523,7 @@ export class LogParser {
       actionLevelRecognitionNodes.length = 0
       activeRecognitionNodeAttempts.clear()
       actionRuntimeStates.clear()
+      waitFreezesRuntimeStates.clear()
       activeSubTaskActionNodes.clear()
       subTasks.clear()
     }
@@ -1397,6 +1564,11 @@ export class LogParser {
       }
 
       for (const state of actionRuntimeStates.values()) {
+        if (state.status !== 'running') continue
+        state.status = fallbackStatus
+        state.end_ts = endTimestamp
+      }
+      for (const state of waitFreezesRuntimeStates.values()) {
         if (state.status !== 'running') continue
         state.status = fallbackStatus
         state.end_ts = endTimestamp
@@ -1468,7 +1640,7 @@ export class LogParser {
                   task_id: task.task_id,
                   reco_details: details.reco_details ? markRaw(details.reco_details) : undefined,
                   action_details: withActionTimestamps(details.action_details, undefined, undefined, startTimestamp),
-                  focus: details.focus ? markRaw(details.focus) : undefined,
+                  focus: resolveEventFocus(details),
                   next_list: [],
                   node_details: details.node_details ? markRaw(details.node_details) : undefined,
                 }
@@ -1479,6 +1651,7 @@ export class LogParser {
                 activeNode.ts = startTimestamp
                 activeNode.end_ts = startTimestamp
                 activeNode.task_id = task.task_id
+                activeNode.focus = resolveEventFocus(details, activeNode.focus)
               }
               refreshActivePipelineNodePreview(event.timestamp)
             }
@@ -1703,6 +1876,22 @@ export class LogParser {
             refreshActivePipelineNodePreview(event.timestamp)
             break
 
+          case 'Node.WaitFreezes.Starting':
+          case 'Node.WaitFreezes.Succeeded':
+          case 'Node.WaitFreezes.Failed': {
+            const waitFreezesStatus: 'running' | 'success' | 'failed' =
+              message === 'Node.WaitFreezes.Starting'
+                ? 'running'
+                : (message === 'Node.WaitFreezes.Succeeded' ? 'success' : 'failed')
+            upsertWaitFreezesState(details, event.timestamp, waitFreezesStatus, eventOrder)
+            const activeNode = getActivePipelineNode()
+            if (activeNode) {
+              activeNode.focus = resolveEventFocus(details, activeNode.focus)
+            }
+            refreshActivePipelineNodePreview(event.timestamp)
+            break
+          }
+
           case 'Node.ActionNode.Starting': {
             const actionId = details.action_details?.action_id ?? details.action_id ?? details.node_id
             if (actionId != null) {
@@ -1871,9 +2060,11 @@ export class LogParser {
                   children: actionFlow.length > 0 ? actionFlow : undefined,
                 }
               : null
-            const nodeFlow = actionRoot
-              ? [...recognitionFlow, actionRoot]
-              : recognitionFlow
+            const nodeFlow = [
+              ...recognitionFlow,
+              ...buildWaitFreezesFlowItems(),
+              ...(actionRoot ? [actionRoot] : []),
+            ]
 
             const resolvedNextList = toNextListItems(currentNextList)
             let nodeStatus: NodeInfo['status'] = pipelineStatus
@@ -1883,7 +2074,7 @@ export class LogParser {
 
             const resolvedName = this.stringPool.intern(nodeName)
             const resolvedRecoDetails = fallbackRecoDetails ? markRaw(fallbackRecoDetails) : undefined
-            const resolvedFocus = details.focus ? markRaw(details.focus) : undefined
+            const resolvedFocus = resolveEventFocus(details, existingNode?.focus)
             const resolvedNodeDetails = details.node_details ? markRaw(details.node_details) : undefined
             const resolvedNodeFlow = nodeFlow.length > 0 ? nodeFlow : undefined
             const resolvedErrorImage = this.findErrorImageByNames(event.timestamp, [
@@ -1892,10 +2083,6 @@ export class LogParser {
               details.reco_details?.name,
               nodeName,
             ])
-            const resolvedWaitFreezesImages = this.findWaitFreezesImages(
-              event.timestamp,
-              details.action_details?.name || details.node_details?.name || nodeName
-            )
 
             if (existingNode) {
               existingNode.name = resolvedName
@@ -1910,7 +2097,6 @@ export class LogParser {
               existingNode.node_flow = resolvedNodeFlow
               existingNode.node_details = resolvedNodeDetails
               existingNode.error_image = resolvedErrorImage
-              existingNode.wait_freezes_images = resolvedWaitFreezesImages
             } else {
               const node: NodeInfo = {
                 node_id: nodeId,
@@ -1925,8 +2111,7 @@ export class LogParser {
                 next_list: resolvedNextList,
                 node_flow: resolvedNodeFlow,
                 node_details: resolvedNodeDetails,
-                error_image: resolvedErrorImage,
-                wait_freezes_images: resolvedWaitFreezesImages
+                error_image: resolvedErrorImage
               }
               nodes.push(node)
               pipelineNodesById.set(nodeId, node)
@@ -1962,6 +2147,11 @@ export class LogParser {
         case 'Node.NextList.Starting':
         case 'Node.NextList.Succeeded':
         case 'Node.NextList.Failed':
+          break
+
+        case 'Node.WaitFreezes.Starting':
+        case 'Node.WaitFreezes.Succeeded':
+        case 'Node.WaitFreezes.Failed':
           break
 
         case 'Node.Recognition.Starting':

@@ -5,6 +5,7 @@ import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@vico
 import type { NodeInfo, MergedRecognitionItem } from '../types'
 import {
   buildNodeActionLevelRecognitionItems,
+  buildNodeActionRepeatCount,
   buildNodeActionRootItem,
   buildNodeRecognitionAttempts,
   buildNodeTaskFlowItems,
@@ -28,6 +29,7 @@ const recognitionAttempts = computed(() => buildNodeRecognitionAttempts(props.no
 const actionLevelRecoItems = computed(() => buildNodeActionLevelRecognitionItems(props.node))
 const taskItems = computed(() => buildNodeTaskFlowItems(props.node))
 const actionRootItem = computed(() => buildNodeActionRootItem(props.node))
+const actionRepeatCount = computed(() => buildNodeActionRepeatCount(props.node))
 
 // Recognition 摘要
 const recognitionSummary = computed(() => {
@@ -82,10 +84,19 @@ const taskGroups = computed(() => {
   }))
 })
 
+const formatActionDisplayName = (name: string): string => {
+  const repeatCount = actionRepeatCount.value
+  if (repeatCount && repeatCount > 1) {
+    return `${name} ×${repeatCount}`
+  }
+  return name
+}
+
 const actionSummary = computed(() => {
   if (actionRootItem.value) {
     return {
-      name: actionRootItem.value.name,
+      name: formatActionDisplayName(actionRootItem.value.name),
+      rawName: actionRootItem.value.name,
       status: actionRootItem.value.status,
       flowItemId: actionRootItem.value.id,
       useFlowItem: true,
@@ -93,7 +104,8 @@ const actionSummary = computed(() => {
   }
   if (!props.node.action_details) return null
   return {
-    name: props.node.action_details.name,
+    name: formatActionDisplayName(props.node.action_details.name),
+    rawName: props.node.action_details.name,
     status: props.node.status === 'running' ? 'running' : (props.node.action_details.success ? 'success' : 'failed'),
     flowItemId: null,
     useFlowItem: false,
@@ -135,6 +147,8 @@ const sectionOrder = computed<Array<'recognition' | 'task' | 'action'>>(() => {
 
   if (actionSummary.value) {
     const actionTs = pickEarliest([
+      actionRootItem.value?.ts,
+      actionRootItem.value?.end_ts,
       props.node.action_details?.ts,
       props.node.action_details?.end_ts,
     ])
@@ -216,7 +230,7 @@ const sectionOrder = computed<Array<'recognition' | 'task' | 'action'>>(() => {
         <task-doc-hover-popover
           :enabled="isVscodeLaunchEmbed === true"
           :request-task-doc="bridgeRequestTaskDoc"
-          :task-name="actionSummary.name"
+          :task-name="actionSummary.rawName"
         >
           <n-button
             text

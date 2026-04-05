@@ -11,6 +11,7 @@ const flowTitleMap: Record<UnifiedFlowItem['type'], UnifiedFlowGroup['title']> =
   pipeline_node: 'PipelineNode',
   recognition: 'Recognition',
   recognition_node: 'RecognitionNode',
+  wait_freezes: 'WaitFreezes',
   action: 'Action',
   action_node: 'ActionNode',
   task: 'Task',
@@ -33,6 +34,32 @@ const sortFlowItems = (items: UnifiedFlowItem[]): UnifiedFlowItem[] => {
     .sort((a, b) => {
       const delta = flowItemTimestampMs(a.item) - flowItemTimestampMs(b.item)
       if (delta !== 0) return delta
+      return a.index - b.index
+    })
+    .map(({ item }) => item)
+}
+
+const actionTimelinePhaseWeight = (item: UnifiedFlowItem): number => {
+  if (item.type === 'wait_freezes') {
+    const phase = item.wait_freezes_details?.phase
+    if (phase === 'pre') return 0
+    if (phase === 'context') return 5
+    if (phase === 'repeat') return 20
+    if (phase === 'post') return 40
+    return 30
+  }
+  if (item.type === 'action') return 10
+  return 15
+}
+
+const sortActionTimelineItems = (items: UnifiedFlowItem[]): UnifiedFlowItem[] => {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const timestampDelta = flowItemTimestampMs(a.item) - flowItemTimestampMs(b.item)
+      if (timestampDelta !== 0) return timestampDelta
+      const phaseDelta = actionTimelinePhaseWeight(a.item) - actionTimelinePhaseWeight(b.item)
+      if (phaseDelta !== 0) return phaseDelta
       return a.index - b.index
     })
     .map(({ item }) => item)
@@ -234,6 +261,10 @@ export const buildNodeActionRootItem = (node: NodeInfo): UnifiedFlowItem | null 
   return buildNodeFlowItems(node).find(item => item.type === 'action') || null
 }
 
+export const buildNodeWaitFreezesFlowItems = (node: NodeInfo): UnifiedFlowItem[] => {
+  return buildNodeFlowItems(node).filter(item => item.type === 'wait_freezes')
+}
+
 export const buildNodeActionFlowItems = (node: NodeInfo): UnifiedFlowItem[] => {
   const root = buildNodeActionRootItem(node)
   return sortFlowItems(root?.children ?? []).map(sortFlowTree)
@@ -245,6 +276,66 @@ export const buildNodeActionLevelRecognitionItems = (node: NodeInfo): UnifiedFlo
 
 export const buildNodeTaskFlowItems = (node: NodeInfo): UnifiedFlowItem[] => {
   return buildNodeActionFlowItems(node).filter(item => item.type === 'task')
+}
+
+const buildFallbackActionRootItem = (node: NodeInfo): UnifiedFlowItem | null => {
+  if (!node.action_details) return null
+  const actionStatus: UnifiedFlowItem['status'] =
+    node.status === 'running'
+      ? 'running'
+      : (node.action_details.success ? 'success' : 'failed')
+  const actionTimestamp =
+    node.action_details.ts ||
+    node.action_details.end_ts ||
+    node.end_ts ||
+    node.ts
+
+  return {
+    id: `node.action.${node.action_details.action_id ?? node.node_id}`,
+    type: 'action',
+    name: node.action_details.name || node.name,
+    status: actionStatus,
+    ts: actionTimestamp,
+    end_ts: node.action_details.end_ts || node.end_ts,
+    action_id: node.action_details.action_id,
+    action_details: node.action_details,
+    error_image: node.error_image,
+  }
+}
+
+export const buildNodeActionTimelineItems = (node: NodeInfo): UnifiedFlowItem[] => {
+  const nodeFlowItems = buildNodeFlowItems(node)
+  const actionRootFromFlow = nodeFlowItems.find(item => item.type === 'action') || null
+  const actionRootItem = actionRootFromFlow ?? buildFallbackActionRootItem(node)
+  const actionFlowItems = sortFlowItems(actionRootFromFlow?.children ?? []).map(sortFlowTree)
+  const waitFreezesItems = nodeFlowItems.filter(item => item.type === 'wait_freezes')
+
+  const timelineItems: UnifiedFlowItem[] = []
+  if (actionRootItem) {
+    timelineItems.push({
+      ...actionRootItem,
+      children: undefined,
+    })
+  }
+  timelineItems.push(...actionFlowItems)
+  timelineItems.push(...waitFreezesItems)
+
+  return sortActionTimelineItems(timelineItems).map(sortFlowTree)
+}
+
+export const buildNodeActionRepeatCount = (node: NodeInfo): number | null => {
+  const waitFreezesItems = buildNodeWaitFreezesFlowItems(node)
+  const repeatWaitFreezesCount = waitFreezesItems.filter(
+    item => item.wait_freezes_details?.phase === 'repeat'
+  ).length
+
+  const hasActionOrWaitFreezes =
+    buildNodeActionRootItem(node) != null ||
+    !!node.action_details ||
+    waitFreezesItems.length > 0
+
+  if (!hasActionOrWaitFreezes) return null
+  return repeatWaitFreezesCount + 1
 }
 
 export const groupFlowItemsByType = (items: UnifiedFlowItem[]): UnifiedFlowGroup[] => {

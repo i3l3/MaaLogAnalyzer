@@ -47,6 +47,7 @@ export const createRealtimeEventLineBuilder = () => {
     if (msg.startsWith('NextList.')) return `Node.${msg}`
     if (msg.startsWith('Recognition.')) return `Node.${msg}`
     if (msg.startsWith('Action.')) return `Node.${msg}`
+    if (msg.startsWith('WaitFreezes.')) return `Node.${msg}`
     if (!unknownMessages.has(msg)) {
       unknownMessages.add(msg)
       console.warn('[realtime] unsupported event message ignored:', msg)

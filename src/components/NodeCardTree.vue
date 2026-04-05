@@ -2,8 +2,12 @@
 import { computed, ref, watch } from 'vue'
 import { NButton, NFlex, NText } from 'naive-ui'
 import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@vicons/antd'
-import type { NodeInfo, MergedRecognitionItem } from '../types'
-import { buildNodeActionFlowItems, buildNodeActionLevelRecognitionItems, buildNodeActionRootItem } from '../utils/nodeFlow'
+import type { NodeInfo, MergedRecognitionItem, UnifiedFlowItem } from '../types'
+import {
+  buildNodeActionRepeatCount,
+  buildNodeActionRootItem,
+  buildNodeActionTimelineItems,
+} from '../utils/nodeFlow'
 import { getFlowItemButtonType, getFlowItemShortLabel } from '../utils/flowLabels'
 import { flattenFlowItems, flattenNestedRecognitionNodes } from '../utils/flowTree'
 import TaskDocHoverPopover from './TaskDocHoverPopover.vue'
@@ -78,25 +82,29 @@ watch(() => props.defaultCollapseNestedActionNodes, resetFlowItemExpandState, { 
 watch(() => props.node.node_id, resetNestedRecognitionExpandState, { flush: 'sync' })
 watch(() => props.defaultCollapseNestedRecognition, resetNestedRecognitionExpandState, { flush: 'sync' })
 
-const actionLevelRecognitionItems = computed(() => buildNodeActionLevelRecognitionItems(props.node))
-const taskFlowItems = computed(() =>
-  buildNodeActionFlowItems(props.node).filter(item => item.type !== 'recognition_node')
-)
 const actionRootItem = computed(() => buildNodeActionRootItem(props.node))
-const flowRows = computed(() => flattenFlowItems(taskFlowItems.value, isFlowItemExpanded))
+const actionRepeatCount = computed(() => buildNodeActionRepeatCount(props.node))
+const actionTimelineItems = computed(() => buildNodeActionTimelineItems(props.node))
+const waitFreezesItems = computed(() => actionTimelineItems.value.filter(item => item.type === 'wait_freezes'))
+const flowRows = computed(() => flattenFlowItems(actionTimelineItems.value, isFlowItemExpanded))
 const isRecognitionExpanded = computed(() => props.recognitionExpanded ?? true)
 const isActionExpanded = computed(() => props.actionExpanded ?? true)
-const hasActionNestedChildren = computed(() => actionLevelRecognitionItems.value.length > 0 || flowRows.value.length > 0)
-const actionStatus = computed(() => {
-  if (actionRootItem.value) return actionRootItem.value.status
-  if (props.node.status === 'running' && props.node.action_details) return 'running'
-  if (!props.node.action_details) return null
-  return props.node.action_details.success ? 'success' : 'failed'
-})
-const actionName = computed(() => {
-  if (actionRootItem.value) return actionRootItem.value.name
-  return props.node.action_details?.name ?? ''
-})
+const hasActionSection = computed(() =>
+  actionTimelineItems.value.length > 0 || !!props.node.action_details
+)
+const hasActionNestedChildren = computed(() => flowRows.value.length > 0)
+const formatActionDisplayName = (name: string): string => {
+  const repeatCount = actionRepeatCount.value
+  if (repeatCount && repeatCount > 1) {
+    return `${name} ×${repeatCount}`
+  }
+  return name
+}
+const getActionTimelineItemDisplayName = (item: UnifiedFlowItem): string => {
+  if (item.type !== 'action') return item.name
+  if (actionRootItem.value && item.id !== actionRootItem.value.id) return item.name
+  return formatActionDisplayName(item.name)
+}
 
 const getRecognitionButtonType = (status: MergedRecognitionItem['status']): 'success' | 'warning' | 'info' | 'default' => {
   if (status === 'success') return 'success'
@@ -106,6 +114,33 @@ const getRecognitionButtonType = (status: MergedRecognitionItem['status']): 'suc
 }
 
 const recognitionNodeShortLabel = getFlowItemShortLabel('recognition_node')
+const waitFreezesShortLabel = getFlowItemShortLabel('wait_freezes')
+const repeatWaitFreezesIndexById = computed<Map<string, number>>(() => {
+  const indexById = new Map<string, number>()
+  let repeatIndex = 0
+  for (const item of waitFreezesItems.value) {
+    if (item.wait_freezes_details?.phase === 'repeat') {
+      repeatIndex += 1
+      indexById.set(item.id, repeatIndex)
+    }
+  }
+  return indexById
+})
+const formatWaitFreezesMeta = (item: UnifiedFlowItem): string => {
+  const phase = item.wait_freezes_details?.phase
+  const elapsed = item.wait_freezes_details?.elapsed
+  const parts: string[] = []
+  if (phase) {
+    if (phase === 'repeat') {
+      const repeatIndex = repeatWaitFreezesIndexById.value.get(item.id)
+      parts.push(repeatIndex ? `repeat#${repeatIndex}` : phase)
+    } else {
+      parts.push(phase)
+    }
+  }
+  if (typeof elapsed === 'number') parts.push(`${elapsed}ms`)
+  return parts.length > 0 ? ` · ${parts.join(' · ')}` : ''
+}
 </script>
 
 <template>
@@ -221,116 +256,73 @@ const recognitionNodeShortLabel = getFlowItemShortLabel('recognition_node')
       </li>
     </ul>
 
-    <div style="margin-top: 4px">
+    <div v-if="hasActionSection" style="margin-top: 4px">
       <n-flex align="center" style="gap: 4px">
-        <span class="tree-toggle tree-toggle-hidden" />
-        <n-text depth="3" style="font-size: 12px;">Action</n-text>
+        <span
+          v-if="hasActionNestedChildren"
+          class="tree-toggle"
+          :class="{ 'tree-toggle-collapsed': !isActionExpanded }"
+          @click="emit('toggle-action')"
+        />
+        <span v-else class="tree-toggle-placeholder" />
+        <n-text
+          depth="3"
+          style="font-size: 12px; cursor: pointer"
+          @click="hasActionNestedChildren ? emit('toggle-action') : undefined"
+        >
+          Action
+        </n-text>
       </n-flex>
     </div>
 
-    <ul v-if="actionStatus" class="tree-list">
-      <li class="tree-item">
+    <ul v-if="hasActionSection && isActionExpanded && hasActionNestedChildren" class="tree-list">
+      <li
+        v-for="row in flowRows"
+        :key="`tree-row-${row.item.id}`"
+        class="tree-item"
+        :style="{ '--tree-item-offset': toTreeOffset(row.depth) }"
+      >
         <n-flex align="center" style="gap: 4px">
           <span
-            v-if="hasActionNestedChildren"
+            v-if="row.hasChildren"
             class="tree-toggle"
-            :class="{ 'tree-toggle-collapsed': !isActionExpanded }"
-            @click="emit('toggle-action')"
+            :class="{ 'tree-toggle-collapsed': !row.expanded }"
+            :style="{ marginLeft: toTreeOffset(row.depth) }"
+            @click.stop="toggleFlowItemExpand(row.item.id)"
           />
-          <span v-else class="tree-toggle-placeholder" />
+          <span
+            v-else
+            class="tree-toggle-placeholder"
+            :style="{ marginLeft: toTreeOffset(row.depth) }"
+          />
           <task-doc-hover-popover
             :enabled="isVscodeLaunchEmbed === true"
             :request-task-doc="bridgeRequestTaskDoc"
-            :task-name="actionName"
+            :task-name="row.item.name"
           >
             <n-button
               text
               size="tiny"
-              :type="actionStatus === 'success' ? 'success' : actionStatus === 'running' ? 'warning' : 'error'"
-              @click="actionRootItem ? emit('select-flow-item', node, actionRootItem.id) : emit('select-action', node)"
+              :type="getFlowItemButtonType(row.item)"
+              @click="emit('select-flow-item', node, row.item.id)"
             >
               <template #icon>
-                <check-circle-outlined v-if="actionStatus === 'success'" />
-                <loading-outlined v-else-if="actionStatus === 'running'" />
+                <check-circle-outlined v-if="row.item.status === 'success'" />
+                <loading-outlined v-else-if="row.item.status === 'running'" />
                 <close-circle-outlined v-else />
               </template>
-              {{ actionName }}
+              <template v-if="row.item.type === 'wait_freezes'">
+                {{ waitFreezesShortLabel }} · {{ row.item.name }}{{ formatWaitFreezesMeta(row.item) }}
+              </template>
+              <template v-else-if="row.item.type === 'recognition_node'">
+                {{ recognitionNodeShortLabel }} · {{ row.item.name }}
+              </template>
+              <template v-else>
+                {{ getFlowItemShortLabel(row.item.type) }} · {{ getActionTimelineItemDisplayName(row.item) }}
+              </template>
             </n-button>
           </task-doc-hover-popover>
         </n-flex>
-
-        <ul v-if="isActionExpanded && hasActionNestedChildren" class="tree-list">
-          <li
-            v-for="item in actionLevelRecognitionItems"
-            :key="`tree-action-reco-${item.id}`"
-            class="tree-item"
-            style="--tree-item-offset: 0px"
-          >
-            <n-flex align="center" style="gap: 4px">
-              <span class="tree-toggle-placeholder" style="margin-left: 0px" />
-              <task-doc-hover-popover
-                :enabled="isVscodeLaunchEmbed === true"
-                :request-task-doc="bridgeRequestTaskDoc"
-                :task-name="item.name"
-              >
-                <n-button
-                  text
-                  size="tiny"
-                  :type="item.status === 'success' ? 'success' : item.status === 'running' ? 'info' : 'warning'"
-                  @click="emit('select-flow-item', node, item.id)"
-                >
-                  <template #icon>
-                    <check-circle-outlined v-if="item.status === 'success'" />
-                    <loading-outlined v-else-if="item.status === 'running'" />
-                    <close-circle-outlined v-else />
-                  </template>
-                  {{ recognitionNodeShortLabel }} · {{ item.name }}
-                </n-button>
-              </task-doc-hover-popover>
-            </n-flex>
-          </li>
-
-          <li
-            v-for="row in flowRows"
-            :key="`tree-row-${row.item.id}`"
-            class="tree-item"
-            :style="{ '--tree-item-offset': toTreeOffset(row.depth) }"
-          >
-            <n-flex align="center" style="gap: 4px">
-              <span
-                v-if="row.hasChildren"
-                class="tree-toggle"
-                :class="{ 'tree-toggle-collapsed': !row.expanded }"
-                :style="{ marginLeft: toTreeOffset(row.depth) }"
-                @click.stop="toggleFlowItemExpand(row.item.id)"
-              />
-              <span
-                v-else
-                class="tree-toggle-placeholder"
-                :style="{ marginLeft: toTreeOffset(row.depth) }"
-              />
-              <task-doc-hover-popover
-                :enabled="isVscodeLaunchEmbed === true"
-                :request-task-doc="bridgeRequestTaskDoc"
-                :task-name="row.item.name"
-              >
-                <n-button
-                  text
-                  size="tiny"
-                  :type="getFlowItemButtonType(row.item)"
-                  @click="emit('select-flow-item', node, row.item.id)"
-                >
-                  <template #icon>
-                    <check-circle-outlined v-if="row.item.status === 'success'" />
-                    <loading-outlined v-else-if="row.item.status === 'running'" />
-                    <close-circle-outlined v-else />
-                  </template>
-                  {{ getFlowItemShortLabel(row.item.type) }} · {{ row.item.name }}
-                </n-button>
-              </task-doc-hover-popover>
-            </n-flex>
-          </li>
-        </ul>
       </li>
     </ul>
   </div>

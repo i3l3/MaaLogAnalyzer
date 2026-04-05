@@ -62,6 +62,23 @@ const props = defineProps<{
       <safe-preview-image :src="props.resolveImageSrc(props.selectedFlowErrorImage)" class="detail-preview-image" />
     </div>
 
+    <div
+      v-if="props.selectedFlowItem.wait_freezes_details?.images && props.selectedFlowItem.wait_freezes_details.images.length > 0"
+      style="margin-top: 12px"
+    >
+      <n-text depth="3" style="font-size: 13px; display: block; margin-bottom: 8px">
+        Wait Freezes 截图 ({{ props.selectedFlowItem.wait_freezes_details.images.length }})
+      </n-text>
+      <n-flex vertical style="gap: 8px">
+        <safe-preview-image
+          v-for="(img, idx) in props.selectedFlowItem.wait_freezes_details.images"
+          :key="`wf-img-${idx}`"
+          :src="props.resolveImageSrc(img)"
+          class="detail-preview-image"
+        />
+      </n-flex>
+    </div>
+
     <n-collapse style="margin-top: 16px" :default-expanded-names="props.rawJsonDefaultExpanded">
       <n-collapse-item title="原始事件数据" name="task-json">
         <template #header-extra>

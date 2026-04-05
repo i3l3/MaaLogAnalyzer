@@ -5,6 +5,7 @@ const FLOW_ITEM_SHORT_LABELS: Partial<Record<UnifiedFlowItem['type'], string>> =
   pipeline_node: 'P',
   recognition: 'R',
   recognition_node: 'RN',
+  wait_freezes: 'WF',
   action: 'A',
   action_node: 'AN',
 }
@@ -20,6 +21,6 @@ export const getFlowItemButtonType = (
 ): FlowItemButtonType => {
   if (item.status === 'success') return 'success'
   if (item.status === 'running') return 'info'
-  if (item.type === 'recognition' || item.type === 'recognition_node') return 'warning'
+  if (item.type === 'recognition' || item.type === 'recognition_node' || item.type === 'wait_freezes') return 'warning'
   return 'error'
 }

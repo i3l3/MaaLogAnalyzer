@@ -114,7 +114,6 @@ export interface NodeInfo {
     reco_id: number
   }
   error_image?: string  // 节点截图路径
-  wait_freezes_images?: string[]  // action wait_freezes 调试截图
 }
 
 // 识别详情
@@ -149,11 +148,29 @@ export interface ActionDetail {
   end_ts?: string
 }
 
+export interface WaitFreezesDetail {
+  wf_id: number
+  phase?: string
+  elapsed?: number
+  reco_ids?: number[]
+  roi?: [number, number, number, number]
+  param?: {
+    method?: number
+    rate_limit?: number
+    threshold?: number
+    time?: number
+    timeout?: number
+  }
+  focus?: any
+  images?: string[]
+}
+
 export type UnifiedFlowType =
   | 'task'
   | 'pipeline_node'
   | 'recognition'
   | 'recognition_node'
+  | 'wait_freezes'
   | 'action'
   | 'action_node'
 
@@ -172,6 +189,7 @@ export interface UnifiedFlowItem {
   task_details?: NestedActionGroup['task_details']
   reco_details?: RecognitionDetail
   action_details?: ActionDetail
+  wait_freezes_details?: WaitFreezesDetail
   error_image?: string
   vision_image?: string
   children?: UnifiedFlowItem[]

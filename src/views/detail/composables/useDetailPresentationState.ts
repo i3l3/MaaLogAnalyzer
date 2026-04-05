@@ -76,6 +76,7 @@ export const useDetailPresentationState = (options: UseDetailPresentationStateOp
       case 'pipeline_node': return 'PipelineNode'
       case 'recognition': return 'Recognition'
       case 'recognition_node': return 'RecognitionNode'
+      case 'wait_freezes': return 'WaitFreezes'
       case 'action': return 'Action'
       case 'action_node': return 'ActionNode'
       default: return type
