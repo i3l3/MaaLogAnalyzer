@@ -116,5 +116,76 @@ describe('LogParser sub task scoped node aggregation', () => {
     expect(subWaitFreezes).toBeTruthy()
     expect(subWaitFreezes?.path.some(pathNode => pathNode.type === 'task' && pathNode.task_id === 2)).toBe(true)
   })
-})
 
+  it('keeps sub task ActionNode timeline after helper extraction', async () => {
+    const lines = [
+      makeEventLine(101, 'Tasker.Task.Starting', { task_id: 11, entry: 'MainTask', hash: 'h-main-2', uuid: 'u-main-2' }),
+      makeEventLine(102, 'Node.PipelineNode.Starting', { task_id: 11, node_id: 1101, name: 'MainNode' }),
+
+      makeEventLine(103, 'Tasker.Task.Starting', { task_id: 12, entry: 'SubTask', hash: 'h-sub-2', uuid: 'u-sub-2' }),
+      makeEventLine(104, 'Node.PipelineNode.Starting', { task_id: 12, node_id: 1201, name: 'SubNode' }),
+      makeEventLine(105, 'Node.Action.Starting', { task_id: 12, action_id: 5001, name: 'SubAction' }),
+      makeEventLine(106, 'Node.Action.Succeeded', { task_id: 12, action_id: 5001, name: 'SubAction' }),
+      makeEventLine(107, 'Node.ActionNode.Starting', {
+        task_id: 12,
+        action_id: 5001,
+        node_id: 1201,
+        name: 'SubNode',
+        action_details: {
+          action_id: 5001,
+          action: 'Click',
+          box: [0, 0, 0, 0],
+          detail: {},
+          name: 'SubAction',
+          success: false,
+        },
+      }),
+      makeEventLine(108, 'Node.ActionNode.Failed', {
+        task_id: 12,
+        action_id: 5001,
+        node_id: 1201,
+        name: 'SubNode',
+        action_details: {
+          action_id: 5001,
+          action: 'Click',
+          box: [0, 0, 0, 0],
+          detail: {},
+          name: 'SubAction',
+          success: false,
+        },
+      }),
+      makeEventLine(109, 'Node.PipelineNode.Failed', {
+        task_id: 12,
+        node_id: 1201,
+        name: 'SubNode',
+        action_details: {
+          action_id: 5001,
+          action: 'Click',
+          box: [0, 0, 0, 0],
+          detail: {},
+          name: 'SubAction',
+          success: false,
+        },
+      }),
+      makeEventLine(110, 'Tasker.Task.Failed', { task_id: 12, entry: 'SubTask', hash: 'h-sub-2', uuid: 'u-sub-2' }),
+
+      makeEventLine(111, 'Node.PipelineNode.Succeeded', { task_id: 11, node_id: 1101, name: 'MainNode' }),
+      makeEventLine(112, 'Tasker.Task.Succeeded', { task_id: 11, entry: 'MainTask', hash: 'h-main-2', uuid: 'u-main-2' }),
+    ]
+
+    const parser = new LogParser()
+    await parser.parseFile(lines.join('\n'))
+    const tasks = parser.getTasksSnapshot()
+    const mainTask = tasks.find(item => item.task_id === 11)
+    expect(mainTask).toBeTruthy()
+
+    const mainNode = mainTask!.nodes[0]
+    const subTaskActionItems = collectFlowItems(
+      mainNode.node_flow,
+      (item, path) => item.type === 'action' && item.action_id === 5001 && path.some(pathNode => pathNode.type === 'task' && pathNode.task_id === 12)
+    )
+
+    expect(subTaskActionItems.length).toBeGreaterThan(0)
+    expect(subTaskActionItems[0].item.status).toBe('failed')
+  })
+})

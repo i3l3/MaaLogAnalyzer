@@ -2064,6 +2064,67 @@ export class LogParser {
         error_image: params.errorImage,
       }
     }
+    const resolveActionNodeEventId = (details: Record<string, any>) => {
+      return details.action_details?.action_id ?? details.action_id ?? details.node_id
+    }
+    const handleSubTaskActionNodeStartingEvent = (
+      subTaskId: number,
+      details: Record<string, any>,
+      timestamp: string
+    ) => {
+      const actionId = resolveActionNodeEventId(details)
+      if (actionId == null) return
+      const actionKey = scopedKey(subTaskId, actionId)
+      const startTimestamp = this.stringPool.intern(timestamp)
+      subTaskActionNodeStartTimes.set(actionKey, startTimestamp)
+      if (!activeSubTaskActionNodes.has(actionKey)) {
+        activeSubTaskActionNodes.set(actionKey, {
+          node_id: typeof actionId === 'number' ? actionId : -(nestedActionNodes.length + activeSubTaskActionNodes.size + 1),
+          name: this.stringPool.intern(details.name || ''),
+          ts: startTimestamp,
+          end_ts: startTimestamp,
+          status: 'running',
+          action_details: withActionTimestamps(details.action_details, startTimestamp, undefined, startTimestamp),
+        })
+      }
+    }
+    const handleSubTaskActionNodeFinishedEvent = (
+      subTaskId: number,
+      details: Record<string, any>,
+      timestamp: string,
+      status: 'success' | 'failed'
+    ) => {
+      const actionId = resolveActionNodeEventId(details)
+      const actionKey = actionId != null ? scopedKey(subTaskId, actionId) : null
+      const actionNodeStartTimestamp = actionKey ? subTaskActionNodeStartTimes.get(actionKey) : undefined
+      const actionStartTimestamp = actionKey ? subTaskActionStartTimes.get(actionKey) : undefined
+      const actionEndTimestamp = actionKey ? subTaskActionEndTimes.get(actionKey) : undefined
+      const nowTimestamp = this.stringPool.intern(timestamp)
+      const runningActionNode = actionKey ? activeSubTaskActionNodes.get(actionKey) : undefined
+      const resolvedActionNode: NestedActionNode = runningActionNode ?? {
+        node_id: typeof actionId === 'number' ? actionId : -(nestedActionNodes.length + activeSubTaskActionNodes.size + 1),
+        name: this.stringPool.intern(details.name || ''),
+        ts: actionNodeStartTimestamp || nowTimestamp,
+        end_ts: actionEndTimestamp || nowTimestamp,
+        status: 'running',
+        action_details: undefined,
+      }
+      resolvedActionNode.name = this.stringPool.intern(details.name || resolvedActionNode.name || '')
+      resolvedActionNode.ts = resolvedActionNode.ts || actionNodeStartTimestamp || nowTimestamp
+      resolvedActionNode.end_ts = actionEndTimestamp || nowTimestamp
+      resolvedActionNode.status = status
+      resolvedActionNode.action_details = withActionTimestamps(
+        details.action_details,
+        actionStartTimestamp || actionNodeStartTimestamp || resolvedActionNode.ts,
+        actionEndTimestamp,
+        timestamp
+      )
+      nestedActionNodes.push(resolvedActionNode)
+      if (actionKey) {
+        subTaskActionNodeStartTimes.delete(actionKey)
+        activeSubTaskActionNodes.delete(actionKey)
+      }
+    }
     const composePipelineNodeFlow = (params: {
       topLevelRecognitions: RecognitionAttempt[]
       actionLevelRecognitions: RecognitionAttempt[]
@@ -2390,7 +2451,7 @@ export class LogParser {
         }
 
         case 'Node.ActionNode.Starting': {
-          const actionId = details.action_details?.action_id ?? details.action_id ?? details.node_id
+          const actionId = resolveActionNodeEventId(details)
           if (actionId != null) {
             actionNodeStartTimes.set(actionId, this.stringPool.intern(timestamp))
           }
@@ -2400,7 +2461,7 @@ export class LogParser {
 
         case 'Node.ActionNode.Succeeded':
         case 'Node.ActionNode.Failed': {
-          const actionId = details.action_details?.action_id ?? details.action_id ?? details.node_id
+          const actionId = resolveActionNodeEventId(details)
           if (actionId != null) {
             actionNodeStartTimes.delete(actionId)
           }
@@ -2904,22 +2965,7 @@ export class LogParser {
 
         case 'Node.ActionNode.Starting': {
           if (subTaskId == null) break
-          const actionId = details.action_details?.action_id ?? details.action_id ?? details.node_id
-          if (actionId != null) {
-            const actionKey = scopedKey(subTaskId, actionId)
-            const startTimestamp = this.stringPool.intern(event.timestamp)
-            subTaskActionNodeStartTimes.set(actionKey, startTimestamp)
-            if (!activeSubTaskActionNodes.has(actionKey)) {
-              activeSubTaskActionNodes.set(actionKey, {
-                node_id: typeof actionId === 'number' ? actionId : -(nestedActionNodes.length + activeSubTaskActionNodes.size + 1),
-                name: this.stringPool.intern(details.name || ''),
-                ts: startTimestamp,
-                end_ts: startTimestamp,
-                status: 'running',
-                action_details: withActionTimestamps(details.action_details, startTimestamp, undefined, startTimestamp),
-              })
-            }
-          }
+          handleSubTaskActionNodeStartingEvent(subTaskId, details, event.timestamp)
           refreshActivePipelineNodePreview(event.timestamp)
           break
         }
@@ -2927,36 +2973,12 @@ export class LogParser {
         case 'Node.ActionNode.Succeeded':
         case 'Node.ActionNode.Failed': {
           if (subTaskId == null) break
-          const actionId = details.action_details?.action_id ?? details.action_id ?? details.node_id
-          const actionKey = actionId != null ? scopedKey(subTaskId, actionId) : null
-          const actionNodeStartTimestamp = actionKey ? subTaskActionNodeStartTimes.get(actionKey) : undefined
-          const actionStartTimestamp = actionKey ? subTaskActionStartTimes.get(actionKey) : undefined
-          const actionEndTimestamp = actionKey ? subTaskActionEndTimes.get(actionKey) : undefined
-          const nowTimestamp = this.stringPool.intern(event.timestamp)
-          const runningActionNode = actionKey ? activeSubTaskActionNodes.get(actionKey) : undefined
-          const resolvedActionNode: NestedActionNode = runningActionNode ?? {
-            node_id: typeof actionId === 'number' ? actionId : -(nestedActionNodes.length + activeSubTaskActionNodes.size + 1),
-            name: this.stringPool.intern(details.name || ''),
-            ts: actionNodeStartTimestamp || nowTimestamp,
-            end_ts: actionEndTimestamp || nowTimestamp,
-            status: 'running',
-            action_details: undefined,
-          }
-          resolvedActionNode.name = this.stringPool.intern(details.name || resolvedActionNode.name || '')
-          resolvedActionNode.ts = resolvedActionNode.ts || actionNodeStartTimestamp || nowTimestamp
-          resolvedActionNode.end_ts = actionEndTimestamp || nowTimestamp
-          resolvedActionNode.status = message === 'Node.ActionNode.Succeeded' ? 'success' : 'failed'
-          resolvedActionNode.action_details = withActionTimestamps(
-            details.action_details,
-            actionStartTimestamp || actionNodeStartTimestamp || resolvedActionNode.ts,
-            actionEndTimestamp,
-            event.timestamp
+          handleSubTaskActionNodeFinishedEvent(
+            subTaskId,
+            details,
+            event.timestamp,
+            message === 'Node.ActionNode.Succeeded' ? 'success' : 'failed'
           )
-          nestedActionNodes.push(resolvedActionNode)
-          if (actionKey) {
-            subTaskActionNodeStartTimes.delete(actionKey)
-            activeSubTaskActionNodes.delete(actionKey)
-          }
           refreshActivePipelineNodePreview(event.timestamp)
           break
         }
