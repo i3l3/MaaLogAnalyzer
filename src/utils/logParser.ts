@@ -2064,6 +2064,37 @@ export class LogParser {
         error_image: params.errorImage,
       }
     }
+    const createFinalActionRootFactory = (params: {
+      actionDetails?: NodeInfo['action_details']
+      fallbackStatus: 'success' | 'failed'
+      eventTimestamp: string
+      errorImageCandidates: Array<string | null | undefined>
+      fallbackActionId: number
+      fallbackName: string
+      fallbackTimestamp: string
+    }) => {
+      return (actionFlow: UnifiedFlowItem[]) => {
+        const hasActionRoot = !!params.actionDetails || actionFlow.length > 0
+        if (!hasActionRoot) return null
+
+        const actionStatus: 'success' | 'failed' = params.actionDetails
+          ? (params.actionDetails.success ? 'success' : 'failed')
+          : params.fallbackStatus
+        const resolvedActionErrorImage = actionStatus === 'failed'
+          ? this.findErrorImageByNames(params.eventTimestamp, params.errorImageCandidates)
+          : undefined
+        const resolvedActionId = params.actionDetails?.action_id ?? params.fallbackActionId
+        return createActionRootFlowItem({
+          actionId: resolvedActionId,
+          name: params.actionDetails?.name || params.fallbackName,
+          status: actionStatus,
+          ts: params.actionDetails?.ts || params.actionDetails?.end_ts || params.fallbackTimestamp,
+          endTs: params.actionDetails?.end_ts,
+          actionDetails: params.actionDetails,
+          errorImage: resolvedActionErrorImage,
+        })
+      }
+    }
     const resolveWaitFreezesStatus = (message: string): 'running' | 'success' | 'failed' => {
       if (message === 'Node.WaitFreezes.Starting') return 'running'
       return message === 'Node.WaitFreezes.Succeeded' ? 'success' : 'failed'
@@ -2331,6 +2362,88 @@ export class LogParser {
       }
       clearTaskNodeAggregation(subTaskId)
     }
+    const finalizeSubTaskPipelineNodeEvent = (
+      subTaskId: number,
+      details: Record<string, any>,
+      message: string,
+      timestamp: string
+    ) => {
+      const subTaskPipelineStatus = resolvePipelineNodeFinalStatus(message)
+      const nodeId = details.node_id
+      const endTimestamp = this.stringPool.intern(timestamp)
+      const startTimestamp = nodeId != null
+        ? (subTaskPipelineNodeStartTimes.get(scopedKey(subTaskId, nodeId)) || endTimestamp)
+        : endTimestamp
+      const actionId = details.action_details?.action_id ?? details.node_details?.action_id
+      const actionKey = actionId != null ? scopedKey(subTaskId, actionId) : null
+      const actionStartTimestamp = actionKey ? subTaskActionStartTimes.get(actionKey) : undefined
+      const actionEndTimestamp = actionKey ? subTaskActionEndTimes.get(actionKey) : undefined
+      const matchedTaskAction = consumeMatchedSubTaskAction(subTaskId, actionId)
+      const mergedActionDetails = details.action_details || matchedTaskAction?.action_details
+      const mergedActionStartTimestamp = actionStartTimestamp || matchedTaskAction?.ts
+      const mergedActionEndTimestamp = actionEndTimestamp || matchedTaskAction?.end_ts
+      const taskRecognitions = dedupeRecognitionAttempts(subTasks.consumeRecognitions(subTaskId))
+      const recognitionNodes = dedupeRecognitionAttempts(subTasks.consumeRecognitionNodes(subTaskId))
+      const attachedRecognitions = attachRecognitionNodesToAttempts(taskRecognitions, recognitionNodes)
+      const fallbackRecoDetails =
+        details.reco_details ||
+        (attachedRecognitions.attempts.length > 0
+          ? attachedRecognitions.attempts[attachedRecognitions.attempts.length - 1].reco_details
+          : undefined)
+      const resolvedNodeName = this.stringPool.intern(
+        details.reco_details?.name || details.action_details?.name || details.name || ''
+      )
+      const resolvedNextList = toNextListItems(getTaskNextList(subTaskId))
+      const resolvedActionDetails = withActionTimestamps(
+        mergedActionDetails,
+        mergedActionStartTimestamp,
+        mergedActionEndTimestamp,
+        endTimestamp
+      )
+      const subTaskTopLevelRecognitions = attachedRecognitions.attempts.length > 0
+        ? attachedRecognitions.attempts
+        : attachedRecognitions.orphans
+      const composedSubTaskFlow = composePipelineNodeFlow({
+        topLevelRecognitions: subTaskTopLevelRecognitions,
+        actionLevelRecognitions: [],
+        nestedActionGroups: [],
+        waitFreezesFlow: buildWaitFreezesFlowItems(subTaskId),
+        createActionRoot: createFinalActionRootFactory({
+          actionDetails: resolvedActionDetails,
+          fallbackStatus: subTaskPipelineStatus,
+          eventTimestamp: timestamp,
+          errorImageCandidates: [
+            resolvedActionDetails?.name,
+            details.action_details?.name,
+            details.node_details?.name,
+            details.reco_details?.name,
+            resolvedNodeName,
+          ],
+          fallbackActionId: actionId ?? nodeId,
+          fallbackName: resolvedNodeName,
+          fallbackTimestamp: endTimestamp,
+        }),
+      })
+      const resolvedNodeFlow = composedSubTaskFlow.nodeFlow.length > 0
+        ? composedSubTaskFlow.nodeFlow
+        : undefined
+      subTasks.addPipelineNode(subTaskId, {
+        node_id: nodeId,
+        name: resolvedNodeName,
+        ts: startTimestamp,
+        end_ts: endTimestamp,
+        status: subTaskPipelineStatus,
+        reco_details: fallbackRecoDetails ? markRaw(fallbackRecoDetails) : undefined,
+        action_details: resolvedActionDetails,
+        next_list: resolvedNextList,
+        node_flow: resolvedNodeFlow,
+        recognitions: attachedRecognitions.attempts.length > 0
+          ? attachedRecognitions.attempts
+          : (attachedRecognitions.orphans.length > 0 ? attachedRecognitions.orphans : undefined)
+      })
+      clearSubTaskRuntimeStateAfterPipelineFinalize(subTaskId, nodeId, actionKey)
+      refreshActivePipelineNodePreview(timestamp)
+    }
     const getActivePipelineNode = (): NodeInfo | null => {
       if (activePipelineNodeId == null) return null
       const node = pipelineNodesById.get(activePipelineNodeId)
@@ -2409,6 +2522,215 @@ export class LogParser {
           nestedActionNodes.push(actionNode)
         }
       }
+    }
+    const finalizeTaskPipelineNodeEvent = (
+      taskId: number,
+      details: Record<string, any>,
+      message: string,
+      timestamp: string
+    ) => {
+      const nodeId = details.node_id
+      if (!nodeId) return
+
+      const pipelineStatus = resolvePipelineNodeFinalStatus(message)
+      settleCurrentNodeRuntimeStates(pipelineStatus, timestamp)
+
+      const existingNode = pipelineNodesById.get(nodeId)
+      const nodeName = details.name || ''
+      const startTimestamp = pipelineNodeStartTimes.get(nodeId) || this.stringPool.intern(timestamp)
+      const endTimestamp = this.stringPool.intern(timestamp)
+      const actionId = details.action_details?.action_id ?? details.node_details?.action_id
+      const actionStartTimestamp = actionId != null ? actionStartTimes.get(actionId) : undefined
+      const actionEndTimestamp = actionId != null ? actionEndTimes.get(actionId) : undefined
+      const actionStartOrder = actionId != null ? actionStartOrders.get(actionId) : undefined
+      const actionEndOrder = actionId != null ? actionEndOrders.get(actionId) : undefined
+      const currentTaskRecognitionAttempts = dedupeRecognitionAttempts(currentTaskRecognitions)
+      const scopedTopLevelRecognitions: RecognitionAttempt[] = []
+      const scopedActionRecognitions: RecognitionAttempt[] = []
+      for (const attempt of currentTaskRecognitionAttempts) {
+        const attemptMeta = recognitionOrderMeta.get(attempt)
+        if (
+          actionStartOrder != null &&
+          attemptMeta &&
+          attemptMeta.endSeq >= actionStartOrder &&
+          (actionEndOrder == null || attemptMeta.startSeq <= actionEndOrder)
+        ) {
+          scopedActionRecognitions.push(attempt)
+        } else {
+          scopedTopLevelRecognitions.push(attempt)
+        }
+      }
+      const subTaskActionGroups: NestedActionGroup[] = subTasks.consumeAsNestedActionGroups(this.stringPool).map((group: any) => {
+        const snapshot = subTaskSnapshots.get(group.task_id)
+        if (!snapshot) {
+          return group
+        }
+
+        const snapshotStatus: 'success' | 'failed' | 'running' =
+          snapshot.status === 'failed'
+            ? 'failed'
+            : snapshot.status === 'running'
+              ? 'running'
+              : 'success'
+        const mergedStatus: 'success' | 'failed' | 'running' =
+          group.status === 'failed' || snapshotStatus === 'failed'
+            ? 'failed'
+            : group.status === 'running' || snapshotStatus === 'running'
+              ? 'running'
+              : 'success'
+        const startTimestamp = snapshot.ts || group.ts
+        const endTimestamp = snapshot.end_ts
+
+        return {
+          ...group,
+          name: this.stringPool.intern(snapshot.entry || group.name),
+          ts: this.stringPool.intern(startTimestamp || group.ts),
+          end_ts: endTimestamp ? this.stringPool.intern(endTimestamp) : undefined,
+          status: mergedStatus,
+          task_details: markRaw({
+            task_id: snapshot.task_id,
+            entry: snapshot.entry || '',
+            hash: snapshot.hash || '',
+            uuid: snapshot.uuid || '',
+            status: snapshot.status,
+            ts: snapshot.ts,
+            end_ts: snapshot.end_ts,
+            start_message: snapshot.start_message,
+            end_message: snapshot.end_message,
+            start_details: snapshot.start_details,
+            end_details: snapshot.end_details
+          })
+        }
+      })
+      const subTaskOrphanRecognitionAttempts = subTasks.consumeOrphanRecognitions()
+      const subTaskOrphanRecognitionNodes = subTasks.consumeOrphanRecognitionNodes()
+      const pendingActionLevelRecognitions = dedupeRecognitionAttempts([
+        ...actionLevelRecognitionNodes,
+        ...scopedActionRecognitions,
+        ...subTaskOrphanRecognitionAttempts,
+        ...subTaskOrphanRecognitionNodes
+      ])
+      const scopedAttachResult = attachActionLevelRecognitionAcrossScopes(
+        scopedTopLevelRecognitions,
+        subTaskActionGroups,
+        pendingActionLevelRecognitions,
+        actionStartOrder
+      )
+      const nestedRecognitionInAction = scopedAttachResult.remaining
+      const nestedSubTaskGroups = nestSubTaskActionGroups(scopedAttachResult.nestedActionGroups)
+      const resolvedNestedActionGroups: NestedActionGroup[] =
+        nestedSubTaskGroups.length > 0
+          ? nestedSubTaskGroups
+          : (
+            nestedActionNodes.length > 0
+              ? [
+                  {
+                    task_id: taskId,
+                    name: this.stringPool.intern('ActionNode'),
+                    ts: startTimestamp,
+                    end_ts: endTimestamp,
+                    status: nestedActionNodes.some(item => item.status === 'failed')
+                      ? 'failed'
+                      : nestedActionNodes.some(item => item.status === 'running')
+                        ? 'running'
+                        : 'success',
+                    nested_actions: nestedActionNodes.slice(),
+                  },
+                ]
+              : []
+          )
+      const fallbackRecoDetails =
+        details.reco_details ||
+        (scopedAttachResult.topLevelAttempts.length > 0
+          ? scopedAttachResult.topLevelAttempts[scopedAttachResult.topLevelAttempts.length - 1].reco_details
+          : undefined)
+      const mergedActionDetails = withActionTimestamps(details.action_details, actionStartTimestamp, actionEndTimestamp, endTimestamp)
+      const composedFlow = composePipelineNodeFlow({
+        topLevelRecognitions: scopedAttachResult.topLevelAttempts,
+        actionLevelRecognitions: nestedRecognitionInAction,
+        nestedActionGroups: resolvedNestedActionGroups,
+        waitFreezesFlow: buildWaitFreezesFlowItems(taskId),
+        createActionRoot: createFinalActionRootFactory({
+          actionDetails: mergedActionDetails,
+          fallbackStatus: pipelineStatus,
+          eventTimestamp: timestamp,
+          errorImageCandidates: [
+            mergedActionDetails?.name,
+            details.action_details?.name,
+            details.node_details?.name,
+            details.reco_details?.name,
+            nodeName,
+          ],
+          fallbackActionId: actionId ?? nodeId,
+          fallbackName: this.stringPool.intern(nodeName),
+          fallbackTimestamp: endTimestamp,
+        }),
+      })
+      const nodeFlow = composedFlow.nodeFlow
+      const actionFlow = composedFlow.actionFlow
+
+      const resolvedNextList = toNextListItems(getTaskNextList(taskId))
+      let nodeStatus: NodeInfo['status'] = pipelineStatus
+      if (nodeStatus === 'success' && actionFlow.some(item => item.type === 'task' && item.status === 'failed')) {
+        nodeStatus = 'failed'
+      }
+
+      const resolvedName = this.stringPool.intern(nodeName)
+      const resolvedRecoDetails = fallbackRecoDetails ? markRaw(fallbackRecoDetails) : undefined
+      const resolvedFocus = resolveEventFocus(details, existingNode?.focus)
+      const resolvedNodeDetails = details.node_details ? markRaw(details.node_details) : undefined
+      const resolvedNodeFlow = nodeFlow.length > 0 ? nodeFlow : undefined
+      const resolvedErrorImage = this.findErrorImageByNames(timestamp, [
+        details.action_details?.name,
+        details.node_details?.name,
+        details.reco_details?.name,
+        nodeName,
+      ])
+
+      if (existingNode) {
+        existingNode.name = resolvedName
+        existingNode.ts = startTimestamp
+        existingNode.end_ts = endTimestamp
+        existingNode.status = nodeStatus
+        existingNode.task_id = taskId
+        existingNode.reco_details = resolvedRecoDetails
+        existingNode.action_details = mergedActionDetails
+        existingNode.focus = resolvedFocus
+        existingNode.next_list = resolvedNextList
+        existingNode.node_flow = resolvedNodeFlow
+        existingNode.node_details = resolvedNodeDetails
+        existingNode.error_image = resolvedErrorImage
+      } else {
+        const node: NodeInfo = {
+          node_id: nodeId,
+          name: resolvedName,
+          ts: startTimestamp,
+          end_ts: endTimestamp,
+          status: nodeStatus,
+          task_id: taskId,
+          reco_details: resolvedRecoDetails,
+          action_details: mergedActionDetails,
+          focus: resolvedFocus,
+          next_list: resolvedNextList,
+          node_flow: resolvedNodeFlow,
+          node_details: resolvedNodeDetails,
+          error_image: resolvedErrorImage
+        }
+        nodes.push(node)
+        pipelineNodesById.set(nodeId, node)
+      }
+
+      if (activePipelineNodeId === nodeId) {
+        activePipelineNodeId = null
+      }
+      pipelineNodeStartTimes.delete(nodeId)
+      if (actionId != null) {
+        actionStartTimes.delete(actionId)
+        actionEndTimes.delete(actionId)
+        actionStartOrders.delete(actionId)
+        actionEndOrders.delete(actionId)
+      }
+      resetCurrentNodeAggregation()
     }
     const handleCurrentTaskSimpleNodeEvent = (
       message: string,
@@ -2758,220 +3080,7 @@ export class LogParser {
 
           case 'Node.PipelineNode.Succeeded':
           case 'Node.PipelineNode.Failed': {
-            const nodeId = details.node_id
-            if (!nodeId) break
-            const pipelineStatus = resolvePipelineNodeFinalStatus(message)
-            settleCurrentNodeRuntimeStates(pipelineStatus, event.timestamp)
-
-            const existingNode = pipelineNodesById.get(nodeId)
-            const nodeName = details.name || ''
-            const startTimestamp = pipelineNodeStartTimes.get(nodeId) || this.stringPool.intern(event.timestamp)
-            const endTimestamp = this.stringPool.intern(event.timestamp)
-            const actionId = details.action_details?.action_id ?? details.node_details?.action_id
-            const actionStartTimestamp = actionId != null ? actionStartTimes.get(actionId) : undefined
-            const actionEndTimestamp = actionId != null ? actionEndTimes.get(actionId) : undefined
-            const actionStartOrder = actionId != null ? actionStartOrders.get(actionId) : undefined
-            const actionEndOrder = actionId != null ? actionEndOrders.get(actionId) : undefined
-            const currentTaskRecognitionAttempts = dedupeRecognitionAttempts(currentTaskRecognitions)
-            const scopedTopLevelRecognitions: RecognitionAttempt[] = []
-            const scopedActionRecognitions: RecognitionAttempt[] = []
-            for (const attempt of currentTaskRecognitionAttempts) {
-              const attemptMeta = recognitionOrderMeta.get(attempt)
-              if (
-                actionStartOrder != null &&
-                attemptMeta &&
-                attemptMeta.endSeq >= actionStartOrder &&
-                (actionEndOrder == null || attemptMeta.startSeq <= actionEndOrder)
-              ) {
-                scopedActionRecognitions.push(attempt)
-              } else {
-                scopedTopLevelRecognitions.push(attempt)
-              }
-            }
-            const subTaskActionGroups: NestedActionGroup[] = subTasks.consumeAsNestedActionGroups(this.stringPool).map((group: any) => {
-              const snapshot = subTaskSnapshots.get(group.task_id)
-              if (!snapshot) {
-                return group
-              }
-
-              const snapshotStatus: 'success' | 'failed' | 'running' =
-                snapshot.status === 'failed'
-                  ? 'failed'
-                  : snapshot.status === 'running'
-                    ? 'running'
-                    : 'success'
-              const mergedStatus: 'success' | 'failed' | 'running' =
-                group.status === 'failed' || snapshotStatus === 'failed'
-                  ? 'failed'
-                  : group.status === 'running' || snapshotStatus === 'running'
-                    ? 'running'
-                    : 'success'
-              const startTimestamp = snapshot.ts || group.ts
-              const endTimestamp = snapshot.end_ts
-
-              return {
-                ...group,
-                name: this.stringPool.intern(snapshot.entry || group.name),
-                ts: this.stringPool.intern(startTimestamp || group.ts),
-                end_ts: endTimestamp ? this.stringPool.intern(endTimestamp) : undefined,
-                status: mergedStatus,
-                task_details: markRaw({
-                  task_id: snapshot.task_id,
-                  entry: snapshot.entry || '',
-                  hash: snapshot.hash || '',
-                  uuid: snapshot.uuid || '',
-                  status: snapshot.status,
-                  ts: snapshot.ts,
-                  end_ts: snapshot.end_ts,
-                  start_message: snapshot.start_message,
-                  end_message: snapshot.end_message,
-                  start_details: snapshot.start_details,
-                  end_details: snapshot.end_details
-                })
-              }
-            })
-            const subTaskOrphanRecognitionAttempts = subTasks.consumeOrphanRecognitions()
-            const subTaskOrphanRecognitionNodes = subTasks.consumeOrphanRecognitionNodes()
-            const pendingActionLevelRecognitions = dedupeRecognitionAttempts([
-              ...actionLevelRecognitionNodes,
-              ...scopedActionRecognitions,
-              ...subTaskOrphanRecognitionAttempts,
-              ...subTaskOrphanRecognitionNodes
-            ])
-            const scopedAttachResult = attachActionLevelRecognitionAcrossScopes(
-              scopedTopLevelRecognitions,
-              subTaskActionGroups,
-              pendingActionLevelRecognitions,
-              actionStartOrder
-            )
-            const nestedRecognitionInAction = scopedAttachResult.remaining
-            const nestedSubTaskGroups = nestSubTaskActionGroups(scopedAttachResult.nestedActionGroups)
-            const resolvedNestedActionGroups: NestedActionGroup[] =
-              nestedSubTaskGroups.length > 0
-                ? nestedSubTaskGroups
-                : (
-                  nestedActionNodes.length > 0
-                    ? [
-                        {
-                          task_id: task.task_id,
-                          name: this.stringPool.intern('ActionNode'),
-                          ts: startTimestamp,
-                          end_ts: endTimestamp,
-                          status: nestedActionNodes.some(item => item.status === 'failed')
-                            ? 'failed'
-                            : nestedActionNodes.some(item => item.status === 'running')
-                              ? 'running'
-                              : 'success',
-                          nested_actions: nestedActionNodes.slice(),
-                        },
-                      ]
-                    : []
-                )
-            const fallbackRecoDetails =
-              details.reco_details ||
-              (scopedAttachResult.topLevelAttempts.length > 0
-                ? scopedAttachResult.topLevelAttempts[scopedAttachResult.topLevelAttempts.length - 1].reco_details
-                : undefined)
-            const mergedActionDetails = withActionTimestamps(details.action_details, actionStartTimestamp, actionEndTimestamp, endTimestamp)
-            const resolvedActionId = mergedActionDetails?.action_id ?? actionId ?? nodeId
-            const composedFlow = composePipelineNodeFlow({
-              topLevelRecognitions: scopedAttachResult.topLevelAttempts,
-              actionLevelRecognitions: nestedRecognitionInAction,
-              nestedActionGroups: resolvedNestedActionGroups,
-              waitFreezesFlow: buildWaitFreezesFlowItems(task.task_id),
-              createActionRoot: (actionFlow) => {
-                const hasActionRoot = !!mergedActionDetails || actionFlow.length > 0
-                if (!hasActionRoot) return null
-
-                const actionStatus: 'success' | 'failed' = mergedActionDetails
-                  ? (mergedActionDetails.success ? 'success' : 'failed')
-                  : pipelineStatus
-                const resolvedActionErrorImage = actionStatus === 'failed'
-                  ? this.findErrorImageByNames(event.timestamp, [
-                      mergedActionDetails?.name,
-                      details.action_details?.name,
-                      details.node_details?.name,
-                      details.reco_details?.name,
-                      nodeName,
-                    ])
-                  : undefined
-
-                return createActionRootFlowItem({
-                  actionId: resolvedActionId,
-                  name: mergedActionDetails?.name || this.stringPool.intern(nodeName),
-                  status: actionStatus,
-                  ts: mergedActionDetails?.ts || mergedActionDetails?.end_ts || endTimestamp,
-                  endTs: mergedActionDetails?.end_ts,
-                  actionDetails: mergedActionDetails,
-                  errorImage: resolvedActionErrorImage,
-                })
-              },
-            })
-            const nodeFlow = composedFlow.nodeFlow
-            const actionFlow = composedFlow.actionFlow
-
-            const resolvedNextList = toNextListItems(getTaskNextList(task.task_id))
-            let nodeStatus: NodeInfo['status'] = pipelineStatus
-            if (nodeStatus === 'success' && actionFlow.some(item => item.type === 'task' && item.status === 'failed')) {
-              nodeStatus = 'failed'
-            }
-
-            const resolvedName = this.stringPool.intern(nodeName)
-            const resolvedRecoDetails = fallbackRecoDetails ? markRaw(fallbackRecoDetails) : undefined
-            const resolvedFocus = resolveEventFocus(details, existingNode?.focus)
-            const resolvedNodeDetails = details.node_details ? markRaw(details.node_details) : undefined
-            const resolvedNodeFlow = nodeFlow.length > 0 ? nodeFlow : undefined
-            const resolvedErrorImage = this.findErrorImageByNames(event.timestamp, [
-              details.action_details?.name,
-              details.node_details?.name,
-              details.reco_details?.name,
-              nodeName,
-            ])
-
-            if (existingNode) {
-              existingNode.name = resolvedName
-              existingNode.ts = startTimestamp
-              existingNode.end_ts = endTimestamp
-              existingNode.status = nodeStatus
-              existingNode.task_id = task.task_id
-              existingNode.reco_details = resolvedRecoDetails
-              existingNode.action_details = mergedActionDetails
-              existingNode.focus = resolvedFocus
-              existingNode.next_list = resolvedNextList
-              existingNode.node_flow = resolvedNodeFlow
-              existingNode.node_details = resolvedNodeDetails
-              existingNode.error_image = resolvedErrorImage
-            } else {
-              const node: NodeInfo = {
-                node_id: nodeId,
-                name: resolvedName,
-                ts: startTimestamp,
-                end_ts: endTimestamp,
-                status: nodeStatus,
-                task_id: task.task_id,
-                reco_details: resolvedRecoDetails,
-                action_details: mergedActionDetails,
-                focus: resolvedFocus,
-                next_list: resolvedNextList,
-                node_flow: resolvedNodeFlow,
-                node_details: resolvedNodeDetails,
-                error_image: resolvedErrorImage
-              }
-              nodes.push(node)
-              pipelineNodesById.set(nodeId, node)
-            }
-
-            if (activePipelineNodeId === nodeId) {
-              activePipelineNodeId = null
-            }
-            pipelineNodeStartTimes.delete(nodeId)
-            if (actionId != null) {
-              actionStartTimes.delete(actionId)
-              actionEndTimes.delete(actionId)
-              actionStartOrders.delete(actionId)
-              actionEndOrders.delete(actionId)
-            }
-            resetCurrentNodeAggregation()
+            finalizeTaskPipelineNodeEvent(task.task_id, details, message, event.timestamp)
             break
           }
         }
@@ -3042,93 +3151,7 @@ export class LogParser {
         case 'Node.PipelineNode.Succeeded':
         case 'Node.PipelineNode.Failed': {
           if (subTaskId == null) break
-          const subTaskPipelineStatus = resolvePipelineNodeFinalStatus(message)
-          const nodeId = details.node_id
-          const endTimestamp = this.stringPool.intern(event.timestamp)
-          const startTimestamp = nodeId != null
-            ? (subTaskPipelineNodeStartTimes.get(scopedKey(subTaskId, nodeId)) || endTimestamp)
-            : endTimestamp
-          const actionId = details.action_details?.action_id ?? details.node_details?.action_id
-          const actionKey = actionId != null ? scopedKey(subTaskId, actionId) : null
-          const actionStartTimestamp = actionKey ? subTaskActionStartTimes.get(actionKey) : undefined
-          const actionEndTimestamp = actionKey ? subTaskActionEndTimes.get(actionKey) : undefined
-          const matchedTaskAction = consumeMatchedSubTaskAction(subTaskId, actionId)
-          const mergedActionDetails = details.action_details || matchedTaskAction?.action_details
-          const mergedActionStartTimestamp = actionStartTimestamp || matchedTaskAction?.ts
-          const mergedActionEndTimestamp = actionEndTimestamp || matchedTaskAction?.end_ts
-          const taskRecognitions = dedupeRecognitionAttempts(subTasks.consumeRecognitions(subTaskId))
-          const recognitionNodes = dedupeRecognitionAttempts(subTasks.consumeRecognitionNodes(subTaskId))
-          const attachedRecognitions = attachRecognitionNodesToAttempts(taskRecognitions, recognitionNodes)
-          const fallbackRecoDetails =
-            details.reco_details ||
-            (attachedRecognitions.attempts.length > 0
-              ? attachedRecognitions.attempts[attachedRecognitions.attempts.length - 1].reco_details
-              : undefined)
-          const resolvedNodeName = this.stringPool.intern(
-            details.reco_details?.name || details.action_details?.name || details.name || ''
-          )
-          const resolvedNextList = toNextListItems(getTaskNextList(subTaskId))
-          const resolvedActionDetails = withActionTimestamps(
-            mergedActionDetails,
-            mergedActionStartTimestamp,
-            mergedActionEndTimestamp,
-            endTimestamp
-          )
-          const subTaskTopLevelRecognitions = attachedRecognitions.attempts.length > 0
-            ? attachedRecognitions.attempts
-            : attachedRecognitions.orphans
-          const composedSubTaskFlow = composePipelineNodeFlow({
-            topLevelRecognitions: subTaskTopLevelRecognitions,
-            actionLevelRecognitions: [],
-            nestedActionGroups: [],
-            waitFreezesFlow: buildWaitFreezesFlowItems(subTaskId),
-            createActionRoot: (actionFlow) => {
-              const hasActionRoot = !!resolvedActionDetails || actionFlow.length > 0
-              if (!hasActionRoot) return null
-
-              const actionStatus: 'success' | 'failed' = resolvedActionDetails
-                ? (resolvedActionDetails.success ? 'success' : 'failed')
-                : subTaskPipelineStatus
-              const resolvedActionErrorImage = actionStatus === 'failed'
-                ? this.findErrorImageByNames(event.timestamp, [
-                    resolvedActionDetails?.name,
-                    details.action_details?.name,
-                    details.node_details?.name,
-                    details.reco_details?.name,
-                    resolvedNodeName,
-                  ])
-                : undefined
-              const resolvedActionId = resolvedActionDetails?.action_id ?? actionId ?? nodeId
-              return createActionRootFlowItem({
-                actionId: resolvedActionId,
-                name: resolvedActionDetails?.name || resolvedNodeName,
-                status: actionStatus,
-                ts: resolvedActionDetails?.ts || resolvedActionDetails?.end_ts || endTimestamp,
-                endTs: resolvedActionDetails?.end_ts,
-                actionDetails: resolvedActionDetails,
-                errorImage: resolvedActionErrorImage,
-              })
-            },
-          })
-          const resolvedNodeFlow = composedSubTaskFlow.nodeFlow.length > 0
-            ? composedSubTaskFlow.nodeFlow
-            : undefined
-          subTasks.addPipelineNode(subTaskId, {
-            node_id: nodeId,
-            name: resolvedNodeName,
-            ts: startTimestamp,
-            end_ts: endTimestamp,
-            status: subTaskPipelineStatus,
-            reco_details: fallbackRecoDetails ? markRaw(fallbackRecoDetails) : undefined,
-            action_details: resolvedActionDetails,
-            next_list: resolvedNextList,
-            node_flow: resolvedNodeFlow,
-            recognitions: attachedRecognitions.attempts.length > 0
-              ? attachedRecognitions.attempts
-              : (attachedRecognitions.orphans.length > 0 ? attachedRecognitions.orphans : undefined)
-          })
-          clearSubTaskRuntimeStateAfterPipelineFinalize(subTaskId, nodeId, actionKey)
-          refreshActivePipelineNodePreview(event.timestamp)
+          finalizeSubTaskPipelineNodeEvent(subTaskId, details, message, event.timestamp)
           break
         }
       }
