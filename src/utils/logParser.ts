@@ -2899,7 +2899,8 @@ export class LogParser {
       timestamp: string,
       eventOrder: number
     ): void => {
-      if (phase === 'Starting') {
+      const isStarting = phase === 'Starting'
+      if (isStarting) {
         if (details.action_id != null) {
           const actionId = details.action_id as number
           const startTimestamp = this.stringPool.intern(timestamp)
@@ -2914,10 +2915,7 @@ export class LogParser {
             order: eventOrder,
           })
         }
-        refreshActivePipelineNodePreview(timestamp)
-        return
-      }
-      if (details.action_id != null) {
+      } else if (details.action_id != null) {
         const actionId = details.action_id as number
         const endTimestamp = this.stringPool.intern(timestamp)
         actionEndTimes.set(actionId, endTimestamp)
@@ -2947,34 +2945,33 @@ export class LogParser {
       timestamp: string,
       eventOrder: number
     ): void => {
-      if (phase === 'Starting') {
+      const isStarting = phase === 'Starting'
+      if (isStarting) {
         if (subTaskId != null && details.action_id != null) {
           const actionKey = scopedKey(subTaskId, details.action_id)
           subTaskActionStartTimes.set(actionKey, this.stringPool.intern(timestamp))
           subTaskActionStartOrders.set(actionKey, eventOrder)
         }
-        refreshActivePipelineNodePreview(timestamp)
-        return
+      } else if (subTaskId != null) {
+        const actionId = details.action_id
+        const actionKey = actionId != null ? scopedKey(subTaskId, actionId) : null
+        const endTimestamp = this.stringPool.intern(timestamp)
+        const startTimestamp = actionKey
+          ? (subTaskActionStartTimes.get(actionKey) || endTimestamp)
+          : endTimestamp
+        if (actionKey) {
+          subTaskActionEndTimes.set(actionKey, endTimestamp)
+          subTaskActionEndOrders.set(actionKey, eventOrder)
+        }
+        subTasks.addAction(subTaskId, {
+          action_id: details.action_id,
+          name: this.stringPool.intern(details.name || ''),
+          ts: startTimestamp,
+          end_ts: endTimestamp,
+          status: resolveCompletionStatus(phase),
+          action_details: withActionTimestamps(details.action_details, startTimestamp, endTimestamp, endTimestamp)
+        })
       }
-      if (subTaskId == null) return
-      const actionId = details.action_id
-      const actionKey = actionId != null ? scopedKey(subTaskId, actionId) : null
-      const endTimestamp = this.stringPool.intern(timestamp)
-      const startTimestamp = actionKey
-        ? (subTaskActionStartTimes.get(actionKey) || endTimestamp)
-        : endTimestamp
-      if (actionKey) {
-        subTaskActionEndTimes.set(actionKey, endTimestamp)
-        subTaskActionEndOrders.set(actionKey, eventOrder)
-      }
-      subTasks.addAction(subTaskId, {
-        action_id: details.action_id,
-        name: this.stringPool.intern(details.name || ''),
-        ts: startTimestamp,
-        end_ts: endTimestamp,
-        status: resolveCompletionStatus(phase),
-        action_details: withActionTimestamps(details.action_details, startTimestamp, endTimestamp, endTimestamp)
-      })
       refreshActivePipelineNodePreview(timestamp)
     }
     const handleCurrentTaskActionNodeEvent: ScopedActionNodeEventHandler = (
@@ -2983,17 +2980,17 @@ export class LogParser {
       details: Record<string, any>,
       timestamp: string
     ): void => {
-      if (phase === 'Starting') {
+      const isStarting = phase === 'Starting'
+      if (isStarting) {
         const actionId = resolveActionNodeEventId(details)
         if (actionId != null) {
           actionNodeStartTimes.set(actionId, this.stringPool.intern(timestamp))
         }
-        refreshActivePipelineNodePreview(timestamp)
-        return
-      }
-      const actionId = resolveActionNodeEventId(details)
-      if (actionId != null) {
-        actionNodeStartTimes.delete(actionId)
+      } else {
+        const actionId = resolveActionNodeEventId(details)
+        if (actionId != null) {
+          actionNodeStartTimes.delete(actionId)
+        }
       }
       refreshActivePipelineNodePreview(timestamp)
     }
@@ -3132,19 +3129,18 @@ export class LogParser {
       details: Record<string, any>,
       timestamp: string
     ): void => {
-      if (phase === 'Starting') {
-        if (subTaskId == null) return
-        handleSubTaskActionNodeStartingEvent(subTaskId, details, timestamp)
-        refreshActivePipelineNodePreview(timestamp)
-        return
+      if (subTaskId != null) {
+        if (phase === 'Starting') {
+          handleSubTaskActionNodeStartingEvent(subTaskId, details, timestamp)
+        } else {
+          handleSubTaskActionNodeFinishedEvent(
+            subTaskId,
+            details,
+            timestamp,
+            resolveActionNodeFinalStatus(phase)
+          )
+        }
       }
-      if (subTaskId == null) return
-      handleSubTaskActionNodeFinishedEvent(
-        subTaskId,
-        details,
-        timestamp,
-        resolveActionNodeFinalStatus(phase)
-      )
       refreshActivePipelineNodePreview(timestamp)
     }
     const dispatchActionLevelRecognition = (_taskId: number, recognition: RecognitionAttempt) => {
