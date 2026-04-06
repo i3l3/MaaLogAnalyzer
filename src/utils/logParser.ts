@@ -2064,6 +2064,16 @@ export class LogParser {
         error_image: params.errorImage,
       }
     }
+    const resolveWaitFreezesStatus = (message: string): 'running' | 'success' | 'failed' => {
+      if (message === 'Node.WaitFreezes.Starting') return 'running'
+      return message === 'Node.WaitFreezes.Succeeded' ? 'success' : 'failed'
+    }
+    const resolvePipelineNodeFinalStatus = (message: string): 'success' | 'failed' => {
+      return message === 'Node.PipelineNode.Succeeded' ? 'success' : 'failed'
+    }
+    const resolveActionNodeFinalStatus = (message: string): 'success' | 'failed' => {
+      return message === 'Node.ActionNode.Succeeded' ? 'success' : 'failed'
+    }
     const resolveActionNodeEventId = (details: Record<string, any>) => {
       return details.action_details?.action_id ?? details.action_id ?? details.node_id
     }
@@ -2269,6 +2279,58 @@ export class LogParser {
 
     // 子任务事件收集器
     const subTasks = new SubTaskCollector()
+    const consumeMatchedSubTaskAction = (subTaskId: number, actionId: number | null | undefined) => {
+      const taskActions = subTasks.consumeActions(subTaskId)
+      if (taskActions.length === 0) return undefined
+
+      let matchedTaskAction: any | undefined
+      let matchedTaskActionIndex = -1
+      if (actionId != null) {
+        for (let i = taskActions.length - 1; i >= 0; i--) {
+          if (taskActions[i]?.action_id === actionId) {
+            matchedTaskAction = taskActions[i]
+            matchedTaskActionIndex = i
+            break
+          }
+        }
+      }
+      if (!matchedTaskAction) {
+        matchedTaskActionIndex = taskActions.length - 1
+        matchedTaskAction = taskActions[matchedTaskActionIndex]
+      }
+      for (let i = 0; i < taskActions.length; i++) {
+        if (i === matchedTaskActionIndex) continue
+        subTasks.addAction(subTaskId, taskActions[i])
+      }
+      return matchedTaskAction
+    }
+    const clearSubTaskRuntimeStateAfterPipelineFinalize = (
+      subTaskId: number,
+      nodeId: number | null | undefined,
+      actionKey: string | null
+    ) => {
+      if (nodeId != null) {
+        subTaskPipelineNodeStartTimes.delete(scopedKey(subTaskId, nodeId))
+      }
+      if (actionKey) {
+        subTaskActionStartTimes.delete(actionKey)
+        subTaskActionEndTimes.delete(actionKey)
+        subTaskActionStartOrders.delete(actionKey)
+        subTaskActionEndOrders.delete(actionKey)
+      }
+      const scopedPrefix = `${subTaskId}:`
+      for (const key of activeSubTaskActionNodes.keys()) {
+        if (key.startsWith(scopedPrefix)) {
+          activeSubTaskActionNodes.delete(key)
+        }
+      }
+      for (const key of activeRecognitionNodeAttempts.keys()) {
+        if (key.startsWith(scopedPrefix)) {
+          activeRecognitionNodeAttempts.delete(key)
+        }
+      }
+      clearTaskNodeAggregation(subTaskId)
+    }
     const getActivePipelineNode = (): NodeInfo | null => {
       if (activePipelineNodeId == null) return null
       const node = pipelineNodesById.get(activePipelineNodeId)
@@ -2437,10 +2499,7 @@ export class LogParser {
         case 'Node.WaitFreezes.Starting':
         case 'Node.WaitFreezes.Succeeded':
         case 'Node.WaitFreezes.Failed': {
-          const waitFreezesStatus: 'running' | 'success' | 'failed' =
-            message === 'Node.WaitFreezes.Starting'
-              ? 'running'
-              : (message === 'Node.WaitFreezes.Succeeded' ? 'success' : 'failed')
+          const waitFreezesStatus = resolveWaitFreezesStatus(message)
           upsertWaitFreezesState(task.task_id, details, timestamp, waitFreezesStatus, eventOrder)
           const activeNode = getActivePipelineNode()
           if (activeNode) {
@@ -2510,10 +2569,7 @@ export class LogParser {
         case 'Node.WaitFreezes.Succeeded':
         case 'Node.WaitFreezes.Failed': {
           if (subTaskId != null) {
-            const waitFreezesStatus: 'running' | 'success' | 'failed' =
-              message === 'Node.WaitFreezes.Starting'
-                ? 'running'
-                : (message === 'Node.WaitFreezes.Succeeded' ? 'success' : 'failed')
+            const waitFreezesStatus = resolveWaitFreezesStatus(message)
             upsertWaitFreezesState(subTaskId, details, timestamp, waitFreezesStatus, eventOrder)
           }
           refreshActivePipelineNodePreview(timestamp)
@@ -2704,7 +2760,7 @@ export class LogParser {
           case 'Node.PipelineNode.Failed': {
             const nodeId = details.node_id
             if (!nodeId) break
-            const pipelineStatus: 'success' | 'failed' = message === 'Node.PipelineNode.Succeeded' ? 'success' : 'failed'
+            const pipelineStatus = resolvePipelineNodeFinalStatus(message)
             settleCurrentNodeRuntimeStates(pipelineStatus, event.timestamp)
 
             const existingNode = pipelineNodesById.get(nodeId)
@@ -2829,7 +2885,7 @@ export class LogParser {
 
                 const actionStatus: 'success' | 'failed' = mergedActionDetails
                   ? (mergedActionDetails.success ? 'success' : 'failed')
-                  : (message === 'Node.PipelineNode.Succeeded' ? 'success' : 'failed')
+                  : pipelineStatus
                 const resolvedActionErrorImage = actionStatus === 'failed'
                   ? this.findErrorImageByNames(event.timestamp, [
                       mergedActionDetails?.name,
@@ -2977,7 +3033,7 @@ export class LogParser {
             subTaskId,
             details,
             event.timestamp,
-            message === 'Node.ActionNode.Succeeded' ? 'success' : 'failed'
+            resolveActionNodeFinalStatus(message)
           )
           refreshActivePipelineNodePreview(event.timestamp)
           break
@@ -2986,6 +3042,7 @@ export class LogParser {
         case 'Node.PipelineNode.Succeeded':
         case 'Node.PipelineNode.Failed': {
           if (subTaskId == null) break
+          const subTaskPipelineStatus = resolvePipelineNodeFinalStatus(message)
           const nodeId = details.node_id
           const endTimestamp = this.stringPool.intern(event.timestamp)
           const startTimestamp = nodeId != null
@@ -2995,28 +3052,7 @@ export class LogParser {
           const actionKey = actionId != null ? scopedKey(subTaskId, actionId) : null
           const actionStartTimestamp = actionKey ? subTaskActionStartTimes.get(actionKey) : undefined
           const actionEndTimestamp = actionKey ? subTaskActionEndTimes.get(actionKey) : undefined
-          const taskActions = subTasks.consumeActions(subTaskId)
-          let matchedTaskAction: any | undefined
-          let matchedTaskActionIndex = -1
-          if (taskActions.length > 0) {
-            if (actionId != null) {
-              for (let i = taskActions.length - 1; i >= 0; i--) {
-                if (taskActions[i]?.action_id === actionId) {
-                  matchedTaskAction = taskActions[i]
-                  matchedTaskActionIndex = i
-                  break
-                }
-              }
-            }
-            if (!matchedTaskAction) {
-              matchedTaskActionIndex = taskActions.length - 1
-              matchedTaskAction = taskActions[matchedTaskActionIndex]
-            }
-            for (let i = 0; i < taskActions.length; i++) {
-              if (i === matchedTaskActionIndex) continue
-              subTasks.addAction(subTaskId, taskActions[i])
-            }
-          }
+          const matchedTaskAction = consumeMatchedSubTaskAction(subTaskId, actionId)
           const mergedActionDetails = details.action_details || matchedTaskAction?.action_details
           const mergedActionStartTimestamp = actionStartTimestamp || matchedTaskAction?.ts
           const mergedActionEndTimestamp = actionEndTimestamp || matchedTaskAction?.end_ts
@@ -3052,7 +3088,7 @@ export class LogParser {
 
               const actionStatus: 'success' | 'failed' = resolvedActionDetails
                 ? (resolvedActionDetails.success ? 'success' : 'failed')
-                : (message === 'Node.PipelineNode.Succeeded' ? 'success' : 'failed')
+                : subTaskPipelineStatus
               const resolvedActionErrorImage = actionStatus === 'failed'
                 ? this.findErrorImageByNames(event.timestamp, [
                     resolvedActionDetails?.name,
@@ -3082,7 +3118,7 @@ export class LogParser {
             name: resolvedNodeName,
             ts: startTimestamp,
             end_ts: endTimestamp,
-            status: message === 'Node.PipelineNode.Succeeded' ? 'success' : 'failed',
+            status: subTaskPipelineStatus,
             reco_details: fallbackRecoDetails ? markRaw(fallbackRecoDetails) : undefined,
             action_details: resolvedActionDetails,
             next_list: resolvedNextList,
@@ -3091,27 +3127,7 @@ export class LogParser {
               ? attachedRecognitions.attempts
               : (attachedRecognitions.orphans.length > 0 ? attachedRecognitions.orphans : undefined)
           })
-          if (nodeId != null) {
-            subTaskPipelineNodeStartTimes.delete(scopedKey(subTaskId, nodeId))
-          }
-          if (actionKey) {
-            subTaskActionStartTimes.delete(actionKey)
-            subTaskActionEndTimes.delete(actionKey)
-            subTaskActionStartOrders.delete(actionKey)
-            subTaskActionEndOrders.delete(actionKey)
-          }
-          const scopedPrefix = `${subTaskId}:`
-          for (const key of activeSubTaskActionNodes.keys()) {
-            if (key.startsWith(scopedPrefix)) {
-              activeSubTaskActionNodes.delete(key)
-            }
-          }
-          for (const key of activeRecognitionNodeAttempts.keys()) {
-            if (key.startsWith(scopedPrefix)) {
-              activeRecognitionNodeAttempts.delete(key)
-            }
-          }
-          clearTaskNodeAggregation(subTaskId)
+          clearSubTaskRuntimeStateAfterPipelineFinalize(subTaskId, nodeId, actionKey)
           refreshActivePipelineNodePreview(event.timestamp)
           break
         }
