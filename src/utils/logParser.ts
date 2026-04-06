@@ -936,6 +936,136 @@ export class LogParser {
         }),
       }
     }
+    const sortFlowItemsByTimestamp = (items: UnifiedFlowItem[]): UnifiedFlowItem[] => {
+      return items
+        .map((item, index) => ({ item, index }))
+        .sort((a, b) => {
+          const delta = toTimestampMs(a.item.ts || a.item.end_ts) - toTimestampMs(b.item.ts || b.item.end_ts)
+          if (delta !== 0) return delta
+          return a.index - b.index
+        })
+        .map(({ item }) => item)
+    }
+    const findBestRecognitionParentFlowItem = (
+      flowItems: UnifiedFlowItem[],
+      target: UnifiedFlowItem
+    ): UnifiedFlowItem | null => {
+      const targetTs = toTimestampMs(target.ts || target.end_ts)
+      if (!Number.isFinite(targetTs)) return null
+
+      let bestItem: UnifiedFlowItem | null = null
+      let bestDepth = -1
+      let bestStartMs = Number.NEGATIVE_INFINITY
+      const visit = (items: UnifiedFlowItem[], depth: number) => {
+        for (const item of items) {
+          if (item.type === 'recognition' || item.type === 'recognition_node') {
+            const startMs = toTimestampMs(item.ts || item.end_ts)
+            const endMs = toTimestampMs(item.end_ts || item.ts)
+            const inRange =
+              Number.isFinite(startMs) &&
+              targetTs >= startMs &&
+              (!Number.isFinite(endMs) || targetTs <= endMs + 1)
+            if (inRange) {
+              if (
+                !bestItem ||
+                depth > bestDepth ||
+                (depth === bestDepth && startMs >= bestStartMs)
+              ) {
+                bestItem = item
+                bestDepth = depth
+                bestStartMs = startMs
+              }
+            }
+          }
+          if (item.children && item.children.length > 0) {
+            visit(item.children, depth + 1)
+          }
+        }
+      }
+
+      visit(flowItems, 0)
+      return bestItem
+    }
+    const splitAndAttachWaitFreezesFlowItems = (
+      recognitionFlow: UnifiedFlowItem[],
+      actionFlow: UnifiedFlowItem[],
+      waitFreezesFlow: UnifiedFlowItem[]
+    ) => {
+      const contextItems: UnifiedFlowItem[] = []
+      const nonContextItems: UnifiedFlowItem[] = []
+      for (const item of waitFreezesFlow) {
+        const phase = item.wait_freezes_details?.phase
+        if (phase === 'context') {
+          contextItems.push(item)
+        } else {
+          nonContextItems.push(item)
+        }
+      }
+
+      const unassignedContextItems: UnifiedFlowItem[] = []
+      for (const wfItem of contextItems) {
+        const parent =
+          findBestRecognitionParentFlowItem(recognitionFlow, wfItem) ||
+          findBestRecognitionParentFlowItem(actionFlow, wfItem)
+        if (!parent) {
+          unassignedContextItems.push(wfItem)
+          continue
+        }
+        const mergedChildren = sortFlowItemsByTimestamp([
+          ...(parent.children ?? []),
+          wfItem,
+        ])
+        parent.children = mergedChildren
+      }
+
+      return {
+        recognitionFlow,
+        actionFlow,
+        actionScopeWaitFreezes: sortFlowItemsByTimestamp(nonContextItems),
+        unassignedContextWaitFreezes: sortFlowItemsByTimestamp(unassignedContextItems),
+      }
+    }
+    const partitionActionScopeWaitFreezes = (
+      waitFreezesItems: UnifiedFlowItem[],
+      actionStartTs?: string,
+      actionEndTs?: string,
+      actionStatus?: UnifiedFlowItem['status']
+    ) => {
+      const before: UnifiedFlowItem[] = []
+      const inside: UnifiedFlowItem[] = []
+      const after: UnifiedFlowItem[] = []
+      const startMs = toTimestampMs(actionStartTs)
+      const endMs = actionStatus === 'running'
+        ? Number.POSITIVE_INFINITY
+        : toTimestampMs(actionEndTs)
+      const hasActionWindow = Number.isFinite(startMs) || Number.isFinite(endMs)
+
+      for (const item of waitFreezesItems) {
+        const itemMs = toTimestampMs(item.ts || item.end_ts)
+
+        // No active action window: keep WF at outer timeline level.
+        if (!hasActionWindow) {
+          before.push(item)
+          continue
+        }
+
+        if (Number.isFinite(startMs) && itemMs < startMs) {
+          before.push(item)
+          continue
+        }
+        if (Number.isFinite(endMs) && itemMs > endMs + 1) {
+          after.push(item)
+          continue
+        }
+        inside.push(item)
+      }
+
+      return {
+        before: sortFlowItemsByTimestamp(before),
+        inside: sortFlowItemsByTimestamp(inside),
+        after: sortFlowItemsByTimestamp(after),
+      }
+    }
     const buildWaitFreezesFlowItems = (): UnifiedFlowItem[] => {
       return Array.from(waitFreezesRuntimeStates.values())
         .sort((a, b) => {
@@ -1653,8 +1783,15 @@ export class LogParser {
         : []
 
       const recognitionFlow = buildRecognitionFlowItems(topLevelRecognitions)
-      const waitFreezesFlow = buildWaitFreezesFlowItems()
       const actionFlow = buildActionFlowItems(actionRecognitions, runtimeNestedActionGroups)
+      const waitFreezesFlow = buildWaitFreezesFlowItems()
+      const {
+        recognitionFlow: scopedRecognitionFlow,
+        actionFlow: scopedActionFlow,
+        actionScopeWaitFreezes,
+        unassignedContextWaitFreezes,
+      } = splitAndAttachWaitFreezesFlowItems(recognitionFlow, actionFlow, waitFreezesFlow)
+      const actionScopeWaitFreezesAll = [...actionScopeWaitFreezes, ...unassignedContextWaitFreezes]
       const runtimeActionState = getLatestActionRuntimeState()
       const inferredActionStatus = summarizeActionFlowStatus(actionFlow)
 
@@ -1687,14 +1824,30 @@ export class LogParser {
             action_id: resolvedActionId,
             action_details: activeNode.action_details,
             error_image: runtimeActionErrorImage,
-            children: actionFlow.length > 0 ? actionFlow : undefined,
+            children: [...scopedActionFlow].length > 0
+              ? sortFlowItemsByTimestamp([...scopedActionFlow])
+              : undefined,
           }
         : null
+      const waitFreezesPlacement = partitionActionScopeWaitFreezes(
+        actionScopeWaitFreezesAll,
+        actionRoot?.ts,
+        actionRoot?.end_ts,
+        actionRoot?.status,
+      )
+      if (actionRoot && waitFreezesPlacement.inside.length > 0) {
+        actionRoot.children = sortFlowItemsByTimestamp([
+          ...(actionRoot.children ?? []),
+          ...waitFreezesPlacement.inside,
+        ])
+      }
 
       activeNode.node_flow = [
-        ...recognitionFlow,
-        ...waitFreezesFlow,
+        ...scopedRecognitionFlow,
+        ...waitFreezesPlacement.before,
+        ...(!actionRoot ? waitFreezesPlacement.inside : []),
         ...(actionRoot ? [actionRoot] : []),
+        ...waitFreezesPlacement.after,
       ]
 
       const fallbackRecoDetails =
@@ -2240,6 +2393,14 @@ export class LogParser {
               resolvedNestedActionGroups
             )
             const recognitionFlow = buildRecognitionFlowItems(scopedAttachResult.topLevelAttempts)
+            const waitFreezesFlow = buildWaitFreezesFlowItems()
+            const {
+              recognitionFlow: scopedRecognitionFlow,
+              actionFlow: scopedActionFlow,
+              actionScopeWaitFreezes,
+              unassignedContextWaitFreezes,
+            } = splitAndAttachWaitFreezesFlowItems(recognitionFlow, actionFlow, waitFreezesFlow)
+            const actionScopeWaitFreezesAll = [...actionScopeWaitFreezes, ...unassignedContextWaitFreezes]
             const fallbackRecoDetails =
               details.reco_details ||
               (scopedAttachResult.topLevelAttempts.length > 0
@@ -2271,13 +2432,29 @@ export class LogParser {
                   action_id: resolvedActionId,
                   action_details: mergedActionDetails,
                   error_image: resolvedActionErrorImage,
-                  children: actionFlow.length > 0 ? actionFlow : undefined,
+                  children: [...scopedActionFlow].length > 0
+                    ? sortFlowItemsByTimestamp([...scopedActionFlow])
+                    : undefined,
                 }
               : null
+            const waitFreezesPlacement = partitionActionScopeWaitFreezes(
+              actionScopeWaitFreezesAll,
+              actionRoot?.ts,
+              actionRoot?.end_ts,
+              actionRoot?.status,
+            )
+            if (actionRoot && waitFreezesPlacement.inside.length > 0) {
+              actionRoot.children = sortFlowItemsByTimestamp([
+                ...(actionRoot.children ?? []),
+                ...waitFreezesPlacement.inside,
+              ])
+            }
             const nodeFlow = [
-              ...recognitionFlow,
-              ...buildWaitFreezesFlowItems(),
+              ...scopedRecognitionFlow,
+              ...waitFreezesPlacement.before,
+              ...(!actionRoot ? waitFreezesPlacement.inside : []),
               ...(actionRoot ? [actionRoot] : []),
+              ...waitFreezesPlacement.after,
             ]
 
             const resolvedNextList = toNextListItems(currentNextList)

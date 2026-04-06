@@ -282,7 +282,19 @@ export const buildNodeActionRootItem = (node: NodeInfo): UnifiedFlowItem | null 
 }
 
 export const buildNodeWaitFreezesFlowItems = (node: NodeInfo): UnifiedFlowItem[] => {
-  return buildNodeFlowItems(node).filter(item => item.type === 'wait_freezes')
+  const collected: UnifiedFlowItem[] = []
+  const visit = (items: UnifiedFlowItem[]) => {
+    for (const item of items) {
+      if (item.type === 'wait_freezes') {
+        collected.push(item)
+      }
+      if (item.children && item.children.length > 0) {
+        visit(item.children)
+      }
+    }
+  }
+  visit(buildNodeFlowItems(node))
+  return sortFlowItems(collected).map(sortFlowTree)
 }
 
 export const buildNodeActionFlowItems = (node: NodeInfo): UnifiedFlowItem[] => {

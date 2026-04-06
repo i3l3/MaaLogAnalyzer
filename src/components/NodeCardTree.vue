@@ -6,10 +6,11 @@ import type { NodeInfo, MergedRecognitionItem, UnifiedFlowItem } from '../types'
 import {
   buildNodeActionRepeatCount,
   buildNodeActionRootItem,
+  buildNodeRecognitionFlowItems,
   buildNodeActionTimelineItems,
 } from '../utils/nodeFlow'
 import { getFlowItemButtonType, getFlowItemShortLabel } from '../utils/flowLabels'
-import { flattenFlowItems, flattenNestedRecognitionNodes } from '../utils/flowTree'
+import { flattenFlowItems } from '../utils/flowTree'
 import TaskDocHoverPopover from './TaskDocHoverPopover.vue'
 
 const props = defineProps<{
@@ -85,7 +86,25 @@ watch(() => props.defaultCollapseNestedRecognition, resetNestedRecognitionExpand
 const actionRootItem = computed(() => buildNodeActionRootItem(props.node))
 const actionRepeatCount = computed(() => buildNodeActionRepeatCount(props.node))
 const actionTimelineItems = computed(() => buildNodeActionTimelineItems(props.node))
-const waitFreezesItems = computed(() => actionTimelineItems.value.filter(item => item.type === 'wait_freezes'))
+const recognitionRootFlowItems = computed(() => buildNodeRecognitionFlowItems(props.node))
+const recognitionNestedRowsByAttemptIndex = computed(() => {
+  const rowsByIndex = new Map<number, ReturnType<typeof flattenFlowItems>>()
+  recognitionRootFlowItems.value.forEach((item, index) => {
+    const children = item.children ?? []
+    if (children.length === 0) return
+    rowsByIndex.set(index, flattenFlowItems(children, isNestedRecognitionFlowItemExpanded, 1))
+  })
+  return rowsByIndex
+})
+const getRecognitionNestedRows = (attemptIndex: number) =>
+  recognitionNestedRowsByAttemptIndex.value.get(attemptIndex) ?? []
+const hasRecognitionNestedRows = (attemptIndex: number): boolean =>
+  getRecognitionNestedRows(attemptIndex).length > 0
+const waitFreezesItems = computed(() =>
+  flattenFlowItems(actionTimelineItems.value, () => true)
+    .map(row => row.item)
+    .filter(item => item.type === 'wait_freezes')
+)
 const flowRows = computed(() => flattenFlowItems(actionTimelineItems.value, isFlowItemExpanded))
 const isRecognitionExpanded = computed(() => props.recognitionExpanded ?? true)
 const isActionExpanded = computed(() => props.actionExpanded ?? true)
@@ -155,105 +174,109 @@ const formatWaitFreezesMeta = (item: UnifiedFlowItem): string => {
     </n-flex>
 
     <ul v-if="isRecognitionExpanded && mergedRecognitionList.length > 0" class="tree-list">
-      <li
+      <template
         v-for="(item, index) in mergedRecognitionList"
         :key="`tree-rec-${index}`"
-        class="tree-item"
       >
-        <n-text v-if="item.isRoundSeparator" depth="3" class="tree-round-separator-text">
-          {{ item.name }}
-        </n-text>
-        <template v-else>
+        <li class="tree-item">
+          <n-text v-if="item.isRoundSeparator" depth="3" class="tree-round-separator-text">
+            {{ item.name }}
+          </n-text>
+          <template v-else>
+            <n-flex align="center" style="gap: 4px">
+              <span
+                v-if="item.attemptIndex != null && hasRecognitionNestedRows(item.attemptIndex)"
+                class="tree-toggle"
+                :class="{ 'tree-toggle-collapsed': !isRecognitionNestedExpanded(item.attemptIndex) }"
+                @click.stop="emit('toggle-nested', item.attemptIndex)"
+              />
+              <span v-else class="tree-toggle-placeholder" />
+              <n-button
+                v-if="item.status === 'not-recognized'"
+                text
+                size="tiny"
+                type="default"
+                disabled
+                style="opacity: 0.5"
+              >
+                <template #icon>
+                  <close-circle-outlined />
+                </template>
+                {{ item.name }}
+              </n-button>
+              <task-doc-hover-popover
+                v-else
+                :enabled="isVscodeLaunchEmbed === true"
+                :request-task-doc="bridgeRequestTaskDoc"
+                :task-name="item.attempt?.name ?? item.name"
+              >
+                <n-button
+                  text
+                  size="tiny"
+                  :type="getRecognitionButtonType(item.status)"
+                  @click="item.attemptIndex != null ? emit('select-recognition', node, item.attemptIndex) : undefined"
+                >
+                  <template #icon>
+                    <check-circle-outlined v-if="item.status === 'success'" />
+                    <loading-outlined v-else-if="item.status === 'running'" />
+                    <close-circle-outlined v-else />
+                  </template>
+                  {{ item.name }}
+                </n-button>
+              </task-doc-hover-popover>
+            </n-flex>
+          </template>
+        </li>
+
+        <li
+          v-for="nested in item.attemptIndex != null && isRecognitionNestedExpanded(item.attemptIndex) ? getRecognitionNestedRows(item.attemptIndex) : []"
+          :key="`tree-rec-nested-${item.attemptIndex ?? index}-${nested.item.id}`"
+          class="tree-item"
+          :style="{ '--tree-item-offset': toTreeOffset(nested.depth) }"
+        >
           <n-flex align="center" style="gap: 4px">
             <span
-              v-if="item.hasNestedNodes && item.attemptIndex != null"
+              v-if="nested.hasChildren"
               class="tree-toggle"
-              :class="{ 'tree-toggle-collapsed': !isRecognitionNestedExpanded(item.attemptIndex) }"
-              @click.stop="emit('toggle-nested', item.attemptIndex)"
+              :class="{ 'tree-toggle-collapsed': !nested.expanded }"
+              :style="{ marginLeft: toTreeOffset(nested.depth) }"
+              @click.stop="toggleNestedRecognitionFlowItemExpand(nested.item.id)"
             />
-            <span v-else class="tree-toggle-placeholder" />
-            <n-button
-              v-if="item.status === 'not-recognized'"
-              text
-              size="tiny"
-              type="default"
-              disabled
-              style="opacity: 0.5"
-            >
-              <template #icon>
-                <close-circle-outlined />
-              </template>
-              {{ item.name }}
-            </n-button>
-            <task-doc-hover-popover
+            <span
               v-else
+              class="tree-toggle-placeholder"
+              :style="{ marginLeft: toTreeOffset(nested.depth) }"
+            />
+            <task-doc-hover-popover
               :enabled="isVscodeLaunchEmbed === true"
               :request-task-doc="bridgeRequestTaskDoc"
-              :task-name="item.attempt?.name ?? item.name"
+              :task-name="nested.item.name"
             >
               <n-button
                 text
                 size="tiny"
-                :type="getRecognitionButtonType(item.status)"
-                @click="item.attemptIndex != null ? emit('select-recognition', node, item.attemptIndex) : undefined"
+                :type="getFlowItemButtonType(nested.item)"
+                @click="emit('select-flow-item', node, nested.item.id)"
               >
                 <template #icon>
-                  <check-circle-outlined v-if="item.status === 'success'" />
-                  <loading-outlined v-else-if="item.status === 'running'" />
+                  <check-circle-outlined v-if="nested.item.status === 'success'" />
+                  <loading-outlined v-else-if="nested.item.status === 'running'" />
                   <close-circle-outlined v-else />
                 </template>
-                {{ item.name }}
+                <template v-if="nested.item.type === 'wait_freezes'">
+                  {{ waitFreezesShortLabel }} · {{ nested.item.name }}{{ formatWaitFreezesMeta(nested.item) }}
+                </template>
+                <template v-else-if="nested.item.type === 'recognition_node'">
+                  {{ recognitionNodeShortLabel }} · {{ nested.item.name }}
+                </template>
+                <template v-else>
+                  {{ getFlowItemShortLabel(nested.item.type) }} · {{ nested.item.name }}
+                </template>
               </n-button>
             </task-doc-hover-popover>
           </n-flex>
-
-          <ul
-            v-if="item.hasNestedNodes && item.attemptIndex != null && isRecognitionNestedExpanded(item.attemptIndex) && item.attempt?.nested_nodes && item.attempt.nested_nodes.length > 0"
-            class="tree-list"
-          >
-            <li
-              v-for="nested in flattenNestedRecognitionNodes(item.attempt.nested_nodes, `node.recognition.${item.attemptIndex}`, isNestedRecognitionFlowItemExpanded)"
-              :key="`tree-rec-nested-${item.attemptIndex}-${nested.flowItemId}`"
-              class="tree-item"
-              :style="{ '--tree-item-offset': toTreeOffset(nested.depth) }"
-            >
-              <n-flex align="center" style="gap: 4px">
-                <span
-                  v-if="nested.hasChildren"
-                  class="tree-toggle"
-                  :class="{ 'tree-toggle-collapsed': !nested.expanded }"
-                  :style="{ marginLeft: toTreeOffset(nested.depth) }"
-                  @click.stop="toggleNestedRecognitionFlowItemExpand(nested.flowItemId)"
-                />
-                <span
-                  v-else
-                  class="tree-toggle-placeholder"
-                  :style="{ marginLeft: toTreeOffset(nested.depth) }"
-                />
-                <task-doc-hover-popover
-                  :enabled="isVscodeLaunchEmbed === true"
-                  :request-task-doc="bridgeRequestTaskDoc"
-                  :task-name="nested.attempt.name"
-                >
-                  <n-button
-                    text
-                    size="tiny"
-                    :type="nested.attempt.status === 'success' ? 'success' : nested.attempt.status === 'running' ? 'info' : 'warning'"
-                    @click="emit('select-flow-item', node, nested.flowItemId)"
-                  >
-                    <template #icon>
-                      <check-circle-outlined v-if="nested.attempt.status === 'success'" />
-                      <loading-outlined v-else-if="nested.attempt.status === 'running'" />
-                      <close-circle-outlined v-else />
-                    </template>
-                    {{ recognitionNodeShortLabel }} · {{ nested.attempt.name }}
-                  </n-button>
-                </task-doc-hover-popover>
-              </n-flex>
-            </li>
-          </ul>
-        </template>
-      </li>
+        </li>
+      </template>
     </ul>
 
     <div v-if="hasActionSection" style="margin-top: 4px">

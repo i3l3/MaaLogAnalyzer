@@ -7,10 +7,11 @@ import { resolveImageSrcPath } from '../utils/imageSrc'
 import {
   buildNodeActionRepeatCount,
   buildNodeActionRootItem,
+  buildNodeRecognitionFlowItems,
   buildNodeActionTimelineItems,
 } from '../utils/nodeFlow'
 import { getFlowItemButtonType, getFlowItemShortLabel } from '../utils/flowLabels'
-import { flattenFlowItems, flattenNestedRecognitionNodes } from '../utils/flowTree'
+import { flattenFlowItems } from '../utils/flowTree'
 import TaskDocHoverPopover from './TaskDocHoverPopover.vue'
 import SafePreviewImage from './SafePreviewImage.vue'
 
@@ -84,7 +85,25 @@ watch(() => props.defaultCollapseNestedActionNodes, () => {
 const actionRootItem = computed(() => buildNodeActionRootItem(props.node))
 const actionRepeatCount = computed(() => buildNodeActionRepeatCount(props.node))
 const actionTimelineItems = computed(() => buildNodeActionTimelineItems(props.node))
-const waitFreezesItems = computed(() => actionTimelineItems.value.filter(item => item.type === 'wait_freezes'))
+const recognitionRootFlowItems = computed(() => buildNodeRecognitionFlowItems(props.node))
+const recognitionNestedRowsByAttemptIndex = computed(() => {
+  const rowsByIndex = new Map<number, ReturnType<typeof flattenFlowItems>>()
+  recognitionRootFlowItems.value.forEach((item, index) => {
+    const children = item.children ?? []
+    if (children.length === 0) return
+    rowsByIndex.set(index, flattenFlowItems(children, isNestedRecognitionFlowItemExpanded, 1))
+  })
+  return rowsByIndex
+})
+const getRecognitionNestedRows = (attemptIndex: number) =>
+  recognitionNestedRowsByAttemptIndex.value.get(attemptIndex) ?? []
+const hasRecognitionNestedRows = (attemptIndex: number): boolean =>
+  getRecognitionNestedRows(attemptIndex).length > 0
+const waitFreezesItems = computed(() =>
+  flattenFlowItems(actionTimelineItems.value, () => true)
+    .map(row => row.item)
+    .filter(item => item.type === 'wait_freezes')
+)
 const actionTimelineRows = computed(() => flattenFlowItems(actionTimelineItems.value, isActionFlowItemExpanded))
 
 const hasRecognitionSection = computed(() => props.mergedRecognitionList.length > 0)
@@ -208,7 +227,7 @@ const getRecognitionItemKey = (item: MergedRecognitionItem, idx: number): string
                 </n-button>
               </task-doc-hover-popover>
               <n-button
-                v-if="item.hasNestedNodes && item.attemptIndex != null"
+                v-if="item.attemptIndex != null && hasRecognitionNestedRows(item.attemptIndex)"
                 size="small"
                 class="fixed-toggle-button"
                 @click="emit('toggle-nested', item.attemptIndex)"
@@ -238,23 +257,17 @@ const getRecognitionItemKey = (item: MergedRecognitionItem, idx: number): string
 
             <n-flex
               v-if="
-                item.hasNestedNodes &&
                 item.attemptIndex != null &&
+                hasRecognitionNestedRows(item.attemptIndex) &&
                 isExpanded(item.attemptIndex) &&
-                item.attempt?.nested_nodes &&
-                item.attempt.nested_nodes.length > 0
+                getRecognitionNestedRows(item.attemptIndex).length > 0
               "
               vertical
               style="gap: 8px"
             >
               <template
-                v-for="nested in flattenNestedRecognitionNodes(
-                  item.attempt.nested_nodes,
-                  `node.recognition.${item.attemptIndex}`,
-                  isNestedRecognitionFlowItemExpanded,
-                  1
-                )"
-                :key="`nested-${item.attemptIndex}-${nested.flowItemId}`"
+                v-for="nested in getRecognitionNestedRows(item.attemptIndex)"
+                :key="`nested-${item.attemptIndex}-${nested.item.id}`"
               >
                 <n-flex
                   align="center"
@@ -264,47 +277,70 @@ const getRecognitionItemKey = (item: MergedRecognitionItem, idx: number): string
                   <task-doc-hover-popover
                     :enabled="isVscodeLaunchEmbed === true"
                     :request-task-doc="bridgeRequestTaskDoc"
-                    :task-name="nested.attempt.name"
+                    :task-name="nested.item.name"
                   >
                     <n-button
                       size="small"
-                      :type="nested.attempt.status === 'success' ? 'success' : nested.attempt.status === 'running' ? 'info' : 'warning'"
+                      :type="getFlowItemButtonType(nested.item)"
                       ghost
-                      @click="emit('select-flow-item', node, nested.flowItemId)"
+                      @click="emit('select-flow-item', node, nested.item.id)"
                     >
                       <template #icon>
-                        <check-circle-outlined v-if="nested.attempt.status === 'success'" />
-                        <loading-outlined v-else-if="nested.attempt.status === 'running'" />
+                        <check-circle-outlined v-if="nested.item.status === 'success'" />
+                        <loading-outlined v-else-if="nested.item.status === 'running'" />
                         <close-circle-outlined v-else />
                       </template>
-                      [{{ recognitionNodeShortLabel }}] {{ nested.attempt.name }}
+                      <template v-if="nested.item.type === 'wait_freezes'">
+                        [{{ waitFreezesShortLabel }}] {{ nested.item.name }}{{ formatWaitFreezesDisplay(nested.item) }}
+                      </template>
+                      <template v-else-if="nested.item.type === 'recognition_node'">
+                        [{{ recognitionNodeShortLabel }}] {{ nested.item.name }}
+                      </template>
+                      <template v-else>
+                        [{{ getFlowItemShortLabel(nested.item.type) }}] {{ nested.item.name }}
+                      </template>
                     </n-button>
                   </task-doc-hover-popover>
                   <n-button
                     v-if="nested.hasChildren"
                     size="small"
                     class="fixed-toggle-button"
-                    @click.stop="toggleNestedRecognitionFlowItemExpand(nested.flowItemId)"
+                    @click.stop="toggleNestedRecognitionFlowItemExpand(nested.item.id)"
                   >
                     {{ nested.expanded ? 'Hide' : 'Show' }}
                   </n-button>
                 </n-flex>
 
                 <n-flex
-                  v-if="nested.attempt.vision_image || nested.attempt.error_image"
+                  v-if="nested.item.type === 'recognition_node' && (nested.item.vision_image || nested.item.error_image)"
                   vertical
                   style="gap: 8px"
                   :style="{ marginLeft: `${nested.depth * DETAIL_INDENT_PX + 24}px` }"
                 >
                   <safe-preview-image
-                    v-if="nested.attempt.vision_image"
-                    :src="resolveImageSrcPath(nested.attempt.vision_image)"
+                    v-if="nested.item.vision_image"
+                    :src="resolveImageSrcPath(nested.item.vision_image)"
                     width="180"
                     style="border-radius: 4px"
                   />
                   <safe-preview-image
-                    v-if="nested.attempt.error_image"
-                    :src="resolveImageSrcPath(nested.attempt.error_image)"
+                    v-if="nested.item.error_image"
+                    :src="resolveImageSrcPath(nested.item.error_image)"
+                    width="180"
+                    style="border-radius: 4px"
+                  />
+                </n-flex>
+
+                <n-flex
+                  v-if="nested.item.type === 'wait_freezes' && nested.item.wait_freezes_details?.images && nested.item.wait_freezes_details.images.length > 0"
+                  vertical
+                  style="gap: 8px"
+                  :style="{ marginLeft: `${nested.depth * DETAIL_INDENT_PX + 24}px` }"
+                >
+                  <safe-preview-image
+                    v-for="(img, imgIndex) in nested.item.wait_freezes_details.images"
+                    :key="`nested-wf-img-${nested.item.id}-${imgIndex}`"
+                    :src="resolveImageSrcPath(img)"
                     width="180"
                     style="border-radius: 4px"
                   />
