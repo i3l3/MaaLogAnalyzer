@@ -51,6 +51,7 @@ type MaaDomain = 'Resource' | 'Controller' | 'Tasker' | 'Node' | 'Unknown'
 type MaaPhase = 'Starting' | 'Succeeded' | 'Failed' | 'Unknown'
 type MaaTaskerKind = 'Task' | 'Unknown'
 type MaaNodeKind = 'PipelineNode' | 'RecognitionNode' | 'ActionNode' | 'NextList' | 'Recognition' | 'Action' | 'WaitFreezes' | 'Unknown'
+type KnownMaaPhase = Exclude<MaaPhase, 'Unknown'>
 
 interface MaaMessageMeta {
   domain: MaaDomain
@@ -126,6 +127,15 @@ const parseMaaMessageMeta = (message: string): MaaMessageMeta => {
     taskerKind,
     nodeKind
   }
+}
+
+const toKnownMaaPhase = (phase: MaaPhase): KnownMaaPhase | null => {
+  if (phase === 'Unknown') return null
+  return phase
+}
+
+const resolveCompletionStatus = (phase: KnownMaaPhase): 'success' | 'failed' => {
+  return phase === 'Succeeded' ? 'success' : 'failed'
 }
 
 /**
@@ -811,24 +821,24 @@ export class LogParser {
     }
     type ScopedSimpleNodeEventHandler = (
       taskId: number | null,
-      message: string,
+      messageMeta: MaaMessageMeta,
       details: Record<string, any>,
       timestamp: string,
       eventOrder: number
     ) => boolean
     type ScopedActionEventHandler = (
       taskId: number | null,
-      message: string,
+      phase: KnownMaaPhase,
       details: Record<string, any>,
       timestamp: string,
       eventOrder: number
-    ) => boolean
+    ) => void
     type ScopedActionNodeEventHandler = (
       taskId: number | null,
-      message: string,
+      phase: KnownMaaPhase,
       details: Record<string, any>,
       timestamp: string
-    ) => boolean
+    ) => void
     type ScopedPipelineNodeStartingHandler = (
       taskId: number | null,
       details: Record<string, any>,
@@ -837,7 +847,7 @@ export class LogParser {
     type ScopedPipelineNodeFinalizeHandler = (
       taskId: number | null,
       details: Record<string, any>,
-      message: string,
+      phase: KnownMaaPhase,
       timestamp: string
     ) => void
     type ScopedNodeDispatchConfig = {
@@ -2273,15 +2283,15 @@ export class LogParser {
         }),
       })
     }
-    const resolveWaitFreezesStatus = (message: string): 'running' | 'success' | 'failed' => {
-      if (message === 'Node.WaitFreezes.Starting') return 'running'
-      return message === 'Node.WaitFreezes.Succeeded' ? 'success' : 'failed'
+    const resolveWaitFreezesStatus = (phase: KnownMaaPhase): 'running' | 'success' | 'failed' => {
+      if (phase === 'Starting') return 'running'
+      return resolveCompletionStatus(phase)
     }
-    const resolvePipelineNodeFinalStatus = (message: string): 'success' | 'failed' => {
-      return message === 'Node.PipelineNode.Succeeded' ? 'success' : 'failed'
+    const resolvePipelineNodeFinalStatus = (phase: KnownMaaPhase): 'success' | 'failed' => {
+      return resolveCompletionStatus(phase)
     }
-    const resolveActionNodeFinalStatus = (message: string): 'success' | 'failed' => {
-      return message === 'Node.ActionNode.Succeeded' ? 'success' : 'failed'
+    const resolveActionNodeFinalStatus = (phase: KnownMaaPhase): 'success' | 'failed' => {
+      return resolveCompletionStatus(phase)
     }
     const resolveActionNodeEventId = (details: Record<string, any>) => {
       return details.action_details?.action_id ?? details.action_id ?? details.node_id
@@ -2536,10 +2546,10 @@ export class LogParser {
     const finalizeSubTaskPipelineNodeEvent = (
       subTaskId: number,
       details: Record<string, any>,
-      message: string,
+      phase: KnownMaaPhase,
       timestamp: string
     ) => {
-      const subTaskPipelineStatus = resolvePipelineNodeFinalStatus(message)
+      const subTaskPipelineStatus = resolvePipelineNodeFinalStatus(phase)
       const nodeId = details.node_id
       const endTimestamp = this.stringPool.intern(timestamp)
       const startTimestamp = nodeId != null
@@ -2713,13 +2723,13 @@ export class LogParser {
     const finalizeTaskPipelineNodeEvent = (
       taskId: number,
       details: Record<string, any>,
-      message: string,
+      phase: KnownMaaPhase,
       timestamp: string
     ) => {
       const nodeId = details.node_id
       if (!nodeId) return
 
-      const pipelineStatus = resolvePipelineNodeFinalStatus(message)
+      const pipelineStatus = resolvePipelineNodeFinalStatus(phase)
       settleCurrentNodeRuntimeStates(pipelineStatus, timestamp)
 
       const nodeName = details.name || ''
@@ -2813,15 +2823,12 @@ export class LogParser {
     }
     const handleNextListNodeEvent = (
       taskId: number | null,
-      message: string,
+      phase: KnownMaaPhase,
       details: Record<string, any>,
       timestamp: string
     ): boolean => {
-      if (message !== 'Node.NextList.Starting' && message !== 'Node.NextList.Succeeded' && message !== 'Node.NextList.Failed') {
-        return false
-      }
       if (taskId != null) {
-        if (message === 'Node.NextList.Failed') {
+        if (phase === 'Failed') {
           applyTaskNextList(taskId, [])
         } else {
           applyTaskNextList(taskId, Array.isArray(details.list) ? details.list : [])
@@ -2832,21 +2839,14 @@ export class LogParser {
     }
     const handleWaitFreezesNodeEvent = (
       taskId: number | null,
-      message: string,
+      phase: KnownMaaPhase,
       details: Record<string, any>,
       timestamp: string,
       eventOrder: number,
       onUpdated?: (details: Record<string, any>) => void
     ): boolean => {
-      if (
-        message !== 'Node.WaitFreezes.Starting' &&
-        message !== 'Node.WaitFreezes.Succeeded' &&
-        message !== 'Node.WaitFreezes.Failed'
-      ) {
-        return false
-      }
       if (taskId != null) {
-        const waitFreezesStatus = resolveWaitFreezesStatus(message)
+        const waitFreezesStatus = resolveWaitFreezesStatus(phase)
         upsertWaitFreezesState(taskId, details, timestamp, waitFreezesStatus, eventOrder)
         onUpdated?.(details)
       }
@@ -2855,14 +2855,14 @@ export class LogParser {
     }
     const handleRecognitionNodeEvent = (
       taskId: number | null,
-      message: string,
+      phase: KnownMaaPhase,
       details: Record<string, any>,
       timestamp: string,
       eventOrder: number,
       onAttempt?: (taskId: number, attempt: RecognitionAttempt) => void,
       skipRefreshWhenTaskMissingOnFinish?: boolean
     ): boolean => {
-      if (message === 'Node.Recognition.Starting') {
+      if (phase === 'Starting') {
         if (taskId != null) {
           handleRecognitionStartEvent(
             taskId,
@@ -2875,9 +2875,6 @@ export class LogParser {
         refreshActivePipelineNodePreview(timestamp)
         return true
       }
-      if (message !== 'Node.Recognition.Succeeded' && message !== 'Node.Recognition.Failed') {
-        return false
-      }
       if (taskId == null) {
         if (!skipRefreshWhenTaskMissingOnFinish) {
           refreshActivePipelineNodePreview(timestamp)
@@ -2888,7 +2885,7 @@ export class LogParser {
         taskId,
         details,
         timestamp,
-        message === 'Node.Recognition.Succeeded' ? 'success' : 'failed',
+        resolveCompletionStatus(phase),
         eventOrder,
         onAttempt
       )
@@ -2897,12 +2894,12 @@ export class LogParser {
     }
     const handleCurrentTaskActionEvent: ScopedActionEventHandler = (
       _taskId: number | null,
-      message: string,
+      phase: KnownMaaPhase,
       details: Record<string, any>,
       timestamp: string,
       eventOrder: number
-    ): boolean => {
-      if (message === 'Node.Action.Starting') {
+    ): void => {
+      if (phase === 'Starting') {
         if (details.action_id != null) {
           const actionId = details.action_id as number
           const startTimestamp = this.stringPool.intern(timestamp)
@@ -2918,10 +2915,7 @@ export class LogParser {
           })
         }
         refreshActivePipelineNodePreview(timestamp)
-        return true
-      }
-      if (message !== 'Node.Action.Succeeded' && message !== 'Node.Action.Failed') {
-        return false
+        return
       }
       if (details.action_id != null) {
         const actionId = details.action_id as number
@@ -2930,7 +2924,7 @@ export class LogParser {
         actionEndOrders.set(actionId, eventOrder)
         const existing = actionRuntimeStates.get(actionId)
         if (existing) {
-          existing.status = message === 'Node.Action.Succeeded' ? 'success' : 'failed'
+          existing.status = resolveCompletionStatus(phase)
           existing.end_ts = endTimestamp
           existing.name = this.stringPool.intern(details.name || details.action_details?.name || existing.name || '')
         } else {
@@ -2939,34 +2933,30 @@ export class LogParser {
             name: this.stringPool.intern(details.name || details.action_details?.name || ''),
             ts: endTimestamp,
             end_ts: endTimestamp,
-            status: message === 'Node.Action.Succeeded' ? 'success' : 'failed',
+            status: resolveCompletionStatus(phase),
             order: eventOrder,
           })
         }
       }
       refreshActivePipelineNodePreview(timestamp)
-      return true
     }
     const handleSubTaskActionEvent: ScopedActionEventHandler = (
       subTaskId: number | null,
-      message: string,
+      phase: KnownMaaPhase,
       details: Record<string, any>,
       timestamp: string,
       eventOrder: number
-    ): boolean => {
-      if (message === 'Node.Action.Starting') {
+    ): void => {
+      if (phase === 'Starting') {
         if (subTaskId != null && details.action_id != null) {
           const actionKey = scopedKey(subTaskId, details.action_id)
           subTaskActionStartTimes.set(actionKey, this.stringPool.intern(timestamp))
           subTaskActionStartOrders.set(actionKey, eventOrder)
         }
         refreshActivePipelineNodePreview(timestamp)
-        return true
+        return
       }
-      if (message !== 'Node.Action.Succeeded' && message !== 'Node.Action.Failed') {
-        return false
-      }
-      if (subTaskId == null) return true
+      if (subTaskId == null) return
       const actionId = details.action_id
       const actionKey = actionId != null ? scopedKey(subTaskId, actionId) : null
       const endTimestamp = this.stringPool.intern(timestamp)
@@ -2982,35 +2972,30 @@ export class LogParser {
         name: this.stringPool.intern(details.name || ''),
         ts: startTimestamp,
         end_ts: endTimestamp,
-        status: message === 'Node.Action.Succeeded' ? 'success' : 'failed',
+        status: resolveCompletionStatus(phase),
         action_details: withActionTimestamps(details.action_details, startTimestamp, endTimestamp, endTimestamp)
       })
       refreshActivePipelineNodePreview(timestamp)
-      return true
     }
     const handleCurrentTaskActionNodeEvent: ScopedActionNodeEventHandler = (
       _taskId: number | null,
-      message: string,
+      phase: KnownMaaPhase,
       details: Record<string, any>,
       timestamp: string
-    ): boolean => {
-      if (message === 'Node.ActionNode.Starting') {
+    ): void => {
+      if (phase === 'Starting') {
         const actionId = resolveActionNodeEventId(details)
         if (actionId != null) {
           actionNodeStartTimes.set(actionId, this.stringPool.intern(timestamp))
         }
         refreshActivePipelineNodePreview(timestamp)
-        return true
-      }
-      if (message !== 'Node.ActionNode.Succeeded' && message !== 'Node.ActionNode.Failed') {
-        return false
+        return
       }
       const actionId = resolveActionNodeEventId(details)
       if (actionId != null) {
         actionNodeStartTimes.delete(actionId)
       }
       refreshActivePipelineNodePreview(timestamp)
-      return true
     }
     const syncActiveNodeFocusAfterWaitFreezes = (details: Record<string, any>) => {
       const activeNode = getActivePipelineNode()
@@ -3020,7 +3005,7 @@ export class LogParser {
     }
     const handleSimpleNodeEvent = (
       taskId: number | null,
-      message: string,
+      messageMeta: MaaMessageMeta,
       details: Record<string, any>,
       timestamp: string,
       eventOrder: number,
@@ -3030,56 +3015,50 @@ export class LogParser {
       onRecognitionAttempt?: (taskId: number, attempt: RecognitionAttempt) => void,
       skipRecognitionRefreshWhenTaskMissingOnFinish?: boolean
     ): boolean => {
-      switch (message) {
-        case 'Node.NextList.Starting':
-        case 'Node.NextList.Succeeded':
-        case 'Node.NextList.Failed':
-          return handleNextListNodeEvent(taskId, message, details, timestamp)
-        case 'Node.WaitFreezes.Starting':
-        case 'Node.WaitFreezes.Succeeded':
-        case 'Node.WaitFreezes.Failed':
+      const phase = toKnownMaaPhase(messageMeta.phase)
+      if (!phase) return false
+      switch (messageMeta.nodeKind) {
+        case 'NextList':
+          return handleNextListNodeEvent(taskId, phase, details, timestamp)
+        case 'WaitFreezes':
           return handleWaitFreezesNodeEvent(
             taskId,
-            message,
+            phase,
             details,
             timestamp,
             eventOrder,
             onWaitFreezesUpdated
           )
-        case 'Node.Recognition.Starting':
-        case 'Node.Recognition.Succeeded':
-        case 'Node.Recognition.Failed':
+        case 'Recognition':
           return handleRecognitionNodeEvent(
             taskId,
-            message,
+            phase,
             details,
             timestamp,
             eventOrder,
             onRecognitionAttempt,
             skipRecognitionRefreshWhenTaskMissingOnFinish
           )
-        case 'Node.Action.Starting':
-        case 'Node.Action.Succeeded':
-        case 'Node.Action.Failed':
-          return handleActionEvent(taskId, message, details, timestamp, eventOrder)
-        case 'Node.ActionNode.Starting':
-        case 'Node.ActionNode.Succeeded':
-        case 'Node.ActionNode.Failed':
-          return handleActionNodeEvent(taskId, message, details, timestamp)
+        case 'Action':
+          handleActionEvent(taskId, phase, details, timestamp, eventOrder)
+          return true
+        case 'ActionNode':
+          handleActionNodeEvent(taskId, phase, details, timestamp)
+          return true
         default:
           return false
       }
     }
     const handleCurrentTaskSimpleNodeEvent: ScopedSimpleNodeEventHandler = (
       _taskId: number | null,
-      message: string,
+      messageMeta: MaaMessageMeta,
       details: Record<string, any>,
       timestamp: string,
       eventOrder: number
     ): boolean => {
       return handleSimpleNodeEvent(
         task.task_id,
-        message,
+        messageMeta,
         details,
         timestamp,
         eventOrder,
@@ -3091,14 +3070,14 @@ export class LogParser {
     }
     const handleSubTaskSimpleNodeEvent: ScopedSimpleNodeEventHandler = (
       subTaskId: number | null,
-      message: string,
+      messageMeta: MaaMessageMeta,
       details: Record<string, any>,
       timestamp: string,
       eventOrder: number
     ): boolean => {
       return handleSimpleNodeEvent(
         subTaskId,
-        message,
+        messageMeta,
         details,
         timestamp,
         eventOrder,
@@ -3111,7 +3090,7 @@ export class LogParser {
     }
     const handleRecognitionNodeLifecycleEvent = (
       taskId: number | null,
-      message: string,
+      phase: KnownMaaPhase,
       details: Record<string, any>,
       timestamp: string,
       eventOrder: number,
@@ -3120,7 +3099,7 @@ export class LogParser {
       excludeParentTaskId?: number,
       dispatchDetachedRecognition?: (recognition: RecognitionAttempt) => void
     ): void => {
-      if (message === 'Node.RecognitionNode.Starting') {
+      if (phase === 'Starting') {
         if (taskId == null) return
         startRecognitionNodeEvent(
           taskId,
@@ -3133,13 +3112,12 @@ export class LogParser {
         refreshActivePipelineNodePreview(timestamp)
         return
       }
-      if (message !== 'Node.RecognitionNode.Succeeded' && message !== 'Node.RecognitionNode.Failed') return
       if (taskId == null) return
       finalizeRecognitionNodeEvent(
         taskId,
         details,
         timestamp,
-        message === 'Node.RecognitionNode.Succeeded' ? 'success' : 'failed',
+        resolveCompletionStatus(phase),
         eventOrder,
         subTasks.consumeRecognitions(taskId),
         dispatchPendingRecognition,
@@ -3150,28 +3128,24 @@ export class LogParser {
     }
     const handleSubTaskActionNodeLifecycleEvent: ScopedActionNodeEventHandler = (
       subTaskId: number | null,
-      message: string,
+      phase: KnownMaaPhase,
       details: Record<string, any>,
       timestamp: string
-    ): boolean => {
-      if (message === 'Node.ActionNode.Starting') {
-        if (subTaskId == null) return true
+    ): void => {
+      if (phase === 'Starting') {
+        if (subTaskId == null) return
         handleSubTaskActionNodeStartingEvent(subTaskId, details, timestamp)
         refreshActivePipelineNodePreview(timestamp)
-        return true
+        return
       }
-      if (message !== 'Node.ActionNode.Succeeded' && message !== 'Node.ActionNode.Failed') {
-        return false
-      }
-      if (subTaskId == null) return true
+      if (subTaskId == null) return
       handleSubTaskActionNodeFinishedEvent(
         subTaskId,
         details,
         timestamp,
-        resolveActionNodeFinalStatus(message)
+        resolveActionNodeFinalStatus(phase)
       )
       refreshActivePipelineNodePreview(timestamp)
-      return true
     }
     const dispatchActionLevelRecognition = (_taskId: number, recognition: RecognitionAttempt) => {
       pushActionLevelRecognition(recognition)
@@ -3280,24 +3254,24 @@ export class LogParser {
     const finalizeCurrentTaskPipelineNodeEvent: ScopedPipelineNodeFinalizeHandler = (
       _taskId: number | null,
       details: Record<string, any>,
-      message: string,
+      phase: KnownMaaPhase,
       timestamp: string
     ) => {
-      finalizeTaskPipelineNodeEvent(task.task_id, details, message, timestamp)
+      finalizeTaskPipelineNodeEvent(task.task_id, details, phase, timestamp)
     }
     const finalizeSubTaskPipelineNodeEventByTask: ScopedPipelineNodeFinalizeHandler = (
       subTaskId: number | null,
       details: Record<string, any>,
-      message: string,
+      phase: KnownMaaPhase,
       timestamp: string
     ) => {
       if (subTaskId != null) {
-        finalizeSubTaskPipelineNodeEvent(subTaskId, details, message, timestamp)
+        finalizeSubTaskPipelineNodeEvent(subTaskId, details, phase, timestamp)
       }
     }
     const handleScopedNodeEvent = (
       taskId: number | null,
-      message: string,
+      messageMeta: MaaMessageMeta,
       details: Record<string, any>,
       timestamp: string,
       eventOrder: number,
@@ -3306,16 +3280,16 @@ export class LogParser {
       const excludeParentTaskId = config.excludeTaskIdFromParentRecognitionLookup
         ? (taskId ?? undefined)
         : undefined
-      if (config.handleSimpleNodeEvent(taskId, message, details, timestamp, eventOrder)) {
+      if (config.handleSimpleNodeEvent(taskId, messageMeta, details, timestamp, eventOrder)) {
         return
       }
-      switch (message) {
-        case 'Node.RecognitionNode.Starting':
-        case 'Node.RecognitionNode.Succeeded':
-        case 'Node.RecognitionNode.Failed':
+      const phase = toKnownMaaPhase(messageMeta.phase)
+      if (!phase) return
+      switch (messageMeta.nodeKind) {
+        case 'RecognitionNode':
           handleRecognitionNodeLifecycleEvent(
             taskId,
-            message,
+            phase,
             details,
             timestamp,
             eventOrder,
@@ -3325,12 +3299,12 @@ export class LogParser {
             config.dispatchDetachedRecognition
           )
           return
-        case 'Node.PipelineNode.Starting':
-          config.handlePipelineNodeStarting(taskId, details, timestamp)
-          return
-        case 'Node.PipelineNode.Succeeded':
-        case 'Node.PipelineNode.Failed':
-          config.handlePipelineNodeFinalize(taskId, details, message, timestamp)
+        case 'PipelineNode':
+          if (phase === 'Starting') {
+            config.handlePipelineNodeStarting(taskId, details, timestamp)
+          } else {
+            config.handlePipelineNodeFinalize(taskId, details, phase, timestamp)
+          }
           return
         default:
           return
@@ -3373,7 +3347,7 @@ export class LogParser {
 
       handleScopedNodeEvent(
         isCurrentTask ? task.task_id : (eventTaskId ?? null),
-        message,
+        messageMeta,
         details,
         timestamp,
         eventOrder,

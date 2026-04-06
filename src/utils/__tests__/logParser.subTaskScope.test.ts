@@ -189,6 +189,28 @@ describe('LogParser sub task scoped node aggregation', () => {
     expect(subTaskActionItems[0].item.status).toBe('failed')
   })
 
+  it('tolerates malformed NextList payloads', async () => {
+    const lines = [
+      makeEventLine(151, 'Tasker.Task.Starting', { task_id: 31, entry: 'MainTask', hash: 'h-main-4', uuid: 'u-main-4' }),
+      makeEventLine(152, 'Node.PipelineNode.Starting', { task_id: 31, node_id: 3101, name: 'MainNode' }),
+      makeEventLine(153, 'Node.NextList.Succeeded', {
+        task_id: 31,
+        name: 'MainNode',
+        list: { invalid: true },
+      }),
+      makeEventLine(154, 'Node.PipelineNode.Succeeded', { task_id: 31, node_id: 3101, name: 'MainNode' }),
+      makeEventLine(155, 'Tasker.Task.Succeeded', { task_id: 31, entry: 'MainTask', hash: 'h-main-4', uuid: 'u-main-4' }),
+    ]
+
+    const parser = new LogParser()
+    await parser.parseFile(lines.join('\n'))
+    const tasks = parser.getTasksSnapshot()
+    const mainTask = tasks.find(item => item.task_id === 31)
+    expect(mainTask).toBeTruthy()
+    expect(mainTask?.nodes.length).toBe(1)
+    expect(mainTask?.nodes[0].next_list).toEqual([])
+  })
+
   it('builds multi-level nested sub tasks by parent task relation', async () => {
     const lines = [
       makeEventLine(201, 'Tasker.Task.Starting', { task_id: 21, entry: 'MainTask', hash: 'h-main-3', uuid: 'u-main-3' }),
