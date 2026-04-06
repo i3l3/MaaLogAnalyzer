@@ -1,17 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, toRef, watch } from 'vue'
 import { NButton, NFlex, NText } from 'naive-ui'
 import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@vicons/antd'
-import type { NodeInfo, MergedRecognitionItem, UnifiedFlowItem } from '../types'
-import {
-  buildNodeActionRepeatCount,
-  buildNodeActionRootItem,
-  buildNodeRecognitionFlowItems,
-  buildNodeActionTimelineItems,
-} from '../utils/nodeFlow'
+import type { NodeInfo, MergedRecognitionItem } from '../types'
 import { getFlowItemButtonType, getFlowItemShortLabel } from '../utils/flowLabels'
-import { flattenFlowItems } from '../utils/flowTree'
 import TaskDocHoverPopover from './TaskDocHoverPopover.vue'
+import { useNodeCardFlowRows } from './nodeCard/useNodeCardFlowRows'
 
 const props = defineProps<{
   node: NodeInfo
@@ -83,47 +77,21 @@ watch(() => props.defaultCollapseNestedActionNodes, resetFlowItemExpandState, { 
 watch(() => props.node.node_id, resetNestedRecognitionExpandState, { flush: 'sync' })
 watch(() => props.defaultCollapseNestedRecognition, resetNestedRecognitionExpandState, { flush: 'sync' })
 
-const actionRootItem = computed(() => buildNodeActionRootItem(props.node))
-const actionRepeatCount = computed(() => buildNodeActionRepeatCount(props.node))
-const actionTimelineItems = computed(() => buildNodeActionTimelineItems(props.node))
-const recognitionRootFlowItems = computed(() => buildNodeRecognitionFlowItems(props.node))
-const recognitionNestedRowsByAttemptIndex = computed(() => {
-  const rowsByIndex = new Map<number, ReturnType<typeof flattenFlowItems>>()
-  recognitionRootFlowItems.value.forEach((item, index) => {
-    const children = item.children ?? []
-    if (children.length === 0) return
-    rowsByIndex.set(index, flattenFlowItems(children, isNestedRecognitionFlowItemExpanded, 1))
-  })
-  return rowsByIndex
+const {
+  actionTimelineRows: flowRows,
+  getRecognitionNestedRows,
+  hasRecognitionNestedRows,
+  formatWaitFreezesMeta,
+  getActionTimelineItemDisplayName,
+  hasActionSection,
+  hasActionNestedChildren,
+} = useNodeCardFlowRows({
+  node: toRef(props, 'node'),
+  isActionFlowItemExpanded: isFlowItemExpanded,
+  isRecognitionNestedFlowItemExpanded: isNestedRecognitionFlowItemExpanded,
 })
-const getRecognitionNestedRows = (attemptIndex: number) =>
-  recognitionNestedRowsByAttemptIndex.value.get(attemptIndex) ?? []
-const hasRecognitionNestedRows = (attemptIndex: number): boolean =>
-  getRecognitionNestedRows(attemptIndex).length > 0
-const waitFreezesItems = computed(() =>
-  flattenFlowItems(actionTimelineItems.value, () => true)
-    .map(row => row.item)
-    .filter(item => item.type === 'wait_freezes')
-)
-const flowRows = computed(() => flattenFlowItems(actionTimelineItems.value, isFlowItemExpanded))
 const isRecognitionExpanded = computed(() => props.recognitionExpanded ?? true)
 const isActionExpanded = computed(() => props.actionExpanded ?? true)
-const hasActionSection = computed(() =>
-  actionTimelineItems.value.length > 0 || !!props.node.action_details
-)
-const hasActionNestedChildren = computed(() => flowRows.value.length > 0)
-const formatActionDisplayName = (name: string): string => {
-  const repeatCount = actionRepeatCount.value
-  if (repeatCount && repeatCount > 1) {
-    return `${name} ×${repeatCount}`
-  }
-  return name
-}
-const getActionTimelineItemDisplayName = (item: UnifiedFlowItem): string => {
-  if (item.type !== 'action') return item.name
-  if (actionRootItem.value && item.id !== actionRootItem.value.id) return item.name
-  return formatActionDisplayName(item.name)
-}
 
 const getRecognitionButtonType = (status: MergedRecognitionItem['status']): 'success' | 'warning' | 'info' | 'default' => {
   if (status === 'success') return 'success'
@@ -134,32 +102,6 @@ const getRecognitionButtonType = (status: MergedRecognitionItem['status']): 'suc
 
 const recognitionNodeShortLabel = getFlowItemShortLabel('recognition_node')
 const waitFreezesShortLabel = getFlowItemShortLabel('wait_freezes')
-const repeatWaitFreezesIndexById = computed<Map<string, number>>(() => {
-  const indexById = new Map<string, number>()
-  let repeatIndex = 0
-  for (const item of waitFreezesItems.value) {
-    if (item.wait_freezes_details?.phase === 'repeat') {
-      repeatIndex += 1
-      indexById.set(item.id, repeatIndex)
-    }
-  }
-  return indexById
-})
-const formatWaitFreezesMeta = (item: UnifiedFlowItem): string => {
-  const phase = item.wait_freezes_details?.phase
-  const elapsed = item.wait_freezes_details?.elapsed
-  const parts: string[] = []
-  if (phase) {
-    if (phase === 'repeat') {
-      const repeatIndex = repeatWaitFreezesIndexById.value.get(item.id)
-      parts.push(repeatIndex ? `repeat#${repeatIndex}` : phase)
-    } else {
-      parts.push(phase)
-    }
-  }
-  if (typeof elapsed === 'number') parts.push(`${elapsed}ms`)
-  return parts.length > 0 ? ` · ${parts.join(' · ')}` : ''
-}
 </script>
 
 <template>
