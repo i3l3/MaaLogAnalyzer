@@ -2828,6 +2828,163 @@ export class LogParser {
       refreshActivePipelineNodePreview(params.timestamp)
       return true
     }
+    const handleRecognitionNodeEvent = (params: {
+      taskId: number | null
+      message: string
+      details: Record<string, any>
+      timestamp: string
+      eventOrder: number
+      onAttempt?: (attempt: RecognitionAttempt) => void
+      skipRefreshWhenTaskMissingOnFinish?: boolean
+    }): boolean => {
+      if (params.message === 'Node.Recognition.Starting') {
+        if (params.taskId != null) {
+          handleRecognitionStartEvent(
+            params.taskId,
+            params.details,
+            params.timestamp,
+            params.eventOrder,
+            params.onAttempt
+          )
+        }
+        refreshActivePipelineNodePreview(params.timestamp)
+        return true
+      }
+      if (params.message !== 'Node.Recognition.Succeeded' && params.message !== 'Node.Recognition.Failed') {
+        return false
+      }
+      if (params.taskId == null) {
+        if (!params.skipRefreshWhenTaskMissingOnFinish) {
+          refreshActivePipelineNodePreview(params.timestamp)
+        }
+        return true
+      }
+      handleRecognitionFinishEvent(
+        params.taskId,
+        params.details,
+        params.timestamp,
+        params.message === 'Node.Recognition.Succeeded' ? 'success' : 'failed',
+        params.eventOrder,
+        params.onAttempt
+      )
+      refreshActivePipelineNodePreview(params.timestamp)
+      return true
+    }
+    const handleCurrentTaskActionEvent = (
+      message: string,
+      details: Record<string, any>,
+      timestamp: string,
+      eventOrder: number
+    ): boolean => {
+      if (message === 'Node.Action.Starting') {
+        if (details.action_id != null) {
+          const actionId = details.action_id as number
+          const startTimestamp = this.stringPool.intern(timestamp)
+          actionStartTimes.set(actionId, startTimestamp)
+          actionStartOrders.set(actionId, eventOrder)
+          actionRuntimeStates.set(actionId, {
+            action_id: actionId,
+            name: this.stringPool.intern(details.name || details.action_details?.name || ''),
+            ts: startTimestamp,
+            end_ts: startTimestamp,
+            status: 'running',
+            order: eventOrder,
+          })
+        }
+        refreshActivePipelineNodePreview(timestamp)
+        return true
+      }
+      if (message !== 'Node.Action.Succeeded' && message !== 'Node.Action.Failed') {
+        return false
+      }
+      if (details.action_id != null) {
+        const actionId = details.action_id as number
+        const endTimestamp = this.stringPool.intern(timestamp)
+        actionEndTimes.set(actionId, endTimestamp)
+        actionEndOrders.set(actionId, eventOrder)
+        const existing = actionRuntimeStates.get(actionId)
+        if (existing) {
+          existing.status = message === 'Node.Action.Succeeded' ? 'success' : 'failed'
+          existing.end_ts = endTimestamp
+          existing.name = this.stringPool.intern(details.name || details.action_details?.name || existing.name || '')
+        } else {
+          actionRuntimeStates.set(actionId, {
+            action_id: actionId,
+            name: this.stringPool.intern(details.name || details.action_details?.name || ''),
+            ts: endTimestamp,
+            end_ts: endTimestamp,
+            status: message === 'Node.Action.Succeeded' ? 'success' : 'failed',
+            order: eventOrder,
+          })
+        }
+      }
+      refreshActivePipelineNodePreview(timestamp)
+      return true
+    }
+    const handleSubTaskActionEvent = (
+      subTaskId: number | null,
+      message: string,
+      details: Record<string, any>,
+      timestamp: string,
+      eventOrder: number
+    ): boolean => {
+      if (message === 'Node.Action.Starting') {
+        if (subTaskId != null && details.action_id != null) {
+          const actionKey = scopedKey(subTaskId, details.action_id)
+          subTaskActionStartTimes.set(actionKey, this.stringPool.intern(timestamp))
+          subTaskActionStartOrders.set(actionKey, eventOrder)
+        }
+        refreshActivePipelineNodePreview(timestamp)
+        return true
+      }
+      if (message !== 'Node.Action.Succeeded' && message !== 'Node.Action.Failed') {
+        return false
+      }
+      if (subTaskId == null) return true
+      const actionId = details.action_id
+      const actionKey = actionId != null ? scopedKey(subTaskId, actionId) : null
+      const endTimestamp = this.stringPool.intern(timestamp)
+      const startTimestamp = actionKey
+        ? (subTaskActionStartTimes.get(actionKey) || endTimestamp)
+        : endTimestamp
+      if (actionKey) {
+        subTaskActionEndTimes.set(actionKey, endTimestamp)
+        subTaskActionEndOrders.set(actionKey, eventOrder)
+      }
+      subTasks.addAction(subTaskId, {
+        action_id: details.action_id,
+        name: this.stringPool.intern(details.name || ''),
+        ts: startTimestamp,
+        end_ts: endTimestamp,
+        status: message === 'Node.Action.Succeeded' ? 'success' : 'failed',
+        action_details: withActionTimestamps(details.action_details, startTimestamp, endTimestamp, endTimestamp)
+      })
+      refreshActivePipelineNodePreview(timestamp)
+      return true
+    }
+    const handleCurrentTaskActionNodeEvent = (
+      message: string,
+      details: Record<string, any>,
+      timestamp: string
+    ): boolean => {
+      if (message === 'Node.ActionNode.Starting') {
+        const actionId = resolveActionNodeEventId(details)
+        if (actionId != null) {
+          actionNodeStartTimes.set(actionId, this.stringPool.intern(timestamp))
+        }
+        refreshActivePipelineNodePreview(timestamp)
+        return true
+      }
+      if (message !== 'Node.ActionNode.Succeeded' && message !== 'Node.ActionNode.Failed') {
+        return false
+      }
+      const actionId = resolveActionNodeEventId(details)
+      if (actionId != null) {
+        actionNodeStartTimes.delete(actionId)
+      }
+      refreshActivePipelineNodePreview(timestamp)
+      return true
+    }
     const handleCurrentTaskSimpleNodeEvent = (
       message: string,
       details: Record<string, any>,
@@ -2852,94 +3009,23 @@ export class LogParser {
       })) {
         return true
       }
+      if (handleRecognitionNodeEvent({
+        taskId: task.task_id,
+        message,
+        details,
+        timestamp,
+        eventOrder,
+        onAttempt: pushCurrentTaskRecognitionAttempt,
+      })) {
+        return true
+      }
+      if (handleCurrentTaskActionEvent(message, details, timestamp, eventOrder)) {
+        return true
+      }
+      if (handleCurrentTaskActionNodeEvent(message, details, timestamp)) {
+        return true
+      }
       switch (message) {
-        case 'Node.Recognition.Starting':
-          handleRecognitionStartEvent(
-            task.task_id,
-            details,
-            timestamp,
-            eventOrder,
-            pushCurrentTaskRecognitionAttempt
-          )
-          refreshActivePipelineNodePreview(timestamp)
-          return true
-
-        case 'Node.Recognition.Succeeded':
-        case 'Node.Recognition.Failed':
-          handleRecognitionFinishEvent(
-            task.task_id,
-            details,
-            timestamp,
-            message === 'Node.Recognition.Succeeded' ? 'success' : 'failed',
-            eventOrder,
-            pushCurrentTaskRecognitionAttempt
-          )
-          refreshActivePipelineNodePreview(timestamp)
-          return true
-
-        case 'Node.Action.Starting':
-          if (details.action_id != null) {
-            const actionId = details.action_id as number
-            const startTimestamp = this.stringPool.intern(timestamp)
-            actionStartTimes.set(actionId, startTimestamp)
-            actionStartOrders.set(actionId, eventOrder)
-            actionRuntimeStates.set(actionId, {
-              action_id: actionId,
-              name: this.stringPool.intern(details.name || details.action_details?.name || ''),
-              ts: startTimestamp,
-              end_ts: startTimestamp,
-              status: 'running',
-              order: eventOrder,
-            })
-          }
-          refreshActivePipelineNodePreview(timestamp)
-          return true
-
-        case 'Node.Action.Succeeded':
-        case 'Node.Action.Failed':
-          if (details.action_id != null) {
-            const actionId = details.action_id as number
-            const endTimestamp = this.stringPool.intern(timestamp)
-            actionEndTimes.set(actionId, endTimestamp)
-            actionEndOrders.set(actionId, eventOrder)
-            const existing = actionRuntimeStates.get(actionId)
-            if (existing) {
-              existing.status = message === 'Node.Action.Succeeded' ? 'success' : 'failed'
-              existing.end_ts = endTimestamp
-              existing.name = this.stringPool.intern(details.name || details.action_details?.name || existing.name || '')
-            } else {
-              actionRuntimeStates.set(actionId, {
-                action_id: actionId,
-                name: this.stringPool.intern(details.name || details.action_details?.name || ''),
-                ts: endTimestamp,
-                end_ts: endTimestamp,
-                status: message === 'Node.Action.Succeeded' ? 'success' : 'failed',
-                order: eventOrder,
-              })
-            }
-          }
-          refreshActivePipelineNodePreview(timestamp)
-          return true
-
-        case 'Node.ActionNode.Starting': {
-          const actionId = resolveActionNodeEventId(details)
-          if (actionId != null) {
-            actionNodeStartTimes.set(actionId, this.stringPool.intern(timestamp))
-          }
-          refreshActivePipelineNodePreview(timestamp)
-          return true
-        }
-
-        case 'Node.ActionNode.Succeeded':
-        case 'Node.ActionNode.Failed': {
-          const actionId = resolveActionNodeEventId(details)
-          if (actionId != null) {
-            actionNodeStartTimes.delete(actionId)
-          }
-          refreshActivePipelineNodePreview(timestamp)
-          return true
-        }
-
         default:
           return false
       }
@@ -2963,6 +3049,24 @@ export class LogParser {
       })) {
         return true
       }
+      if (handleRecognitionNodeEvent({
+        taskId: subTaskId,
+        message,
+        details,
+        timestamp,
+        eventOrder,
+        onAttempt: (attempt) => {
+          if (subTaskId != null) {
+            subTasks.addRecognition(subTaskId, attempt)
+          }
+        },
+        skipRefreshWhenTaskMissingOnFinish: true,
+      })) {
+        return true
+      }
+      if (handleSubTaskActionEvent(subTaskId, message, details, timestamp, eventOrder)) {
+        return true
+      }
       switch (message) {
         case 'Node.PipelineNode.Starting':
           if (subTaskId != null) {
@@ -2973,63 +3077,6 @@ export class LogParser {
           }
           refreshActivePipelineNodePreview(timestamp)
           return true
-
-        case 'Node.Recognition.Starting':
-          if (subTaskId != null) {
-            handleRecognitionStartEvent(subTaskId, details, timestamp, eventOrder)
-          }
-          refreshActivePipelineNodePreview(timestamp)
-          return true
-
-        case 'Node.Recognition.Succeeded':
-        case 'Node.Recognition.Failed':
-          if (subTaskId == null) return true
-          handleRecognitionFinishEvent(
-            subTaskId,
-            details,
-            timestamp,
-            message === 'Node.Recognition.Succeeded' ? 'success' : 'failed',
-            eventOrder,
-            (attempt) => {
-              subTasks.addRecognition(subTaskId, attempt)
-            }
-          )
-          refreshActivePipelineNodePreview(timestamp)
-          return true
-
-        case 'Node.Action.Starting':
-          if (subTaskId != null && details.action_id != null) {
-            const actionKey = scopedKey(subTaskId, details.action_id)
-            subTaskActionStartTimes.set(actionKey, this.stringPool.intern(timestamp))
-            subTaskActionStartOrders.set(actionKey, eventOrder)
-          }
-          refreshActivePipelineNodePreview(timestamp)
-          return true
-
-        case 'Node.Action.Succeeded':
-        case 'Node.Action.Failed': {
-          if (subTaskId == null) return true
-          const actionId = details.action_id
-          const actionKey = actionId != null ? scopedKey(subTaskId, actionId) : null
-          const endTimestamp = this.stringPool.intern(timestamp)
-          const startTimestamp = actionKey
-            ? (subTaskActionStartTimes.get(actionKey) || endTimestamp)
-            : endTimestamp
-          if (actionKey) {
-            subTaskActionEndTimes.set(actionKey, endTimestamp)
-            subTaskActionEndOrders.set(actionKey, eventOrder)
-          }
-          subTasks.addAction(subTaskId, {
-            action_id: details.action_id,
-            name: this.stringPool.intern(details.name || ''),
-            ts: startTimestamp,
-            end_ts: endTimestamp,
-            status: message === 'Node.Action.Succeeded' ? 'success' : 'failed',
-            action_details: withActionTimestamps(details.action_details, startTimestamp, endTimestamp, endTimestamp)
-          })
-          refreshActivePipelineNodePreview(timestamp)
-          return true
-        }
 
         default:
           return false

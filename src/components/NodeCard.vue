@@ -41,20 +41,25 @@ const effectiveRecognitionExpanded = computed(() => forceExpandRelatedWhileRunni
 const effectiveActionExpanded = computed(() => forceExpandRelatedWhileRunning.value || actionExpanded.value)
 
 // 监听node变化，清空展开状态
-watch(() => props.node?.node_id, () => {
-  expandedAttempts.value.clear()
+const syncSectionExpandStateFromSettings = () => {
   recognitionExpanded.value = !settings.defaultCollapseRecognition
   actionExpanded.value = !settings.defaultCollapseNestedActionNodes
+}
+
+watch(() => props.node?.node_id, () => {
+  expandedAttempts.value.clear()
+  syncSectionExpandStateFromSettings()
 }, { flush: 'sync' })
 
 // 设置变化时同步默认折叠状态（无需切换节点）
-watch(() => settings.defaultCollapseRecognition, (val: boolean) => {
-  recognitionExpanded.value = !val
-}, { flush: 'sync' })
-
-watch(() => settings.defaultCollapseNestedActionNodes, (val: boolean) => {
-  actionExpanded.value = !val
-}, { flush: 'sync' })
+watch(
+  [
+    () => settings.defaultCollapseRecognition,
+    () => settings.defaultCollapseNestedActionNodes,
+  ],
+  syncSectionExpandStateFromSettings,
+  { flush: 'sync' }
+)
 
 // 节点状态样式
 const cardClass = computed(() => {
