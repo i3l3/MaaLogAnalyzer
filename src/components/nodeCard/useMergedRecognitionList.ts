@@ -18,207 +18,266 @@ type NextEntry = {
   displayName: string
   nextItem: NextListItem
 }
+type RoundAttempt = {
+  attempt: RecognitionAttempt
+  index: number
+  matchName: string
+}
 
-export const useMergedRecognitionList = (params: UseMergedRecognitionListParams) => {
-  const mergedRecognitionList = computed<MergedRecognitionItem[]>(() => {
-    const node = params.node.value
-    const result: MergedRecognitionItem[] = []
+const appendAttemptItem = (
+  result: MergedRecognitionItem[],
+  attempt: RecognitionAttempt,
+  attemptIndex: number,
+  name: string = attempt.name
+) => {
+  result.push({
+    name,
+    status: attempt.status,
+    attemptIndex,
+    attempt,
+  })
+}
 
-    const attempts = buildNodeRecognitionAttempts(node)
-    const nextList: NextListItem[] = node.next_list ?? []
-    const recognitionTargetByNextName = buildRecognitionTargetByNextName(attempts, nextList)
-    const nextListNames = new Set<string>(nextList.map((item: NextListItem) => item.name))
+const appendAttemptsInOriginalOrder = (
+  result: MergedRecognitionItem[],
+  attempts: RecognitionAttempt[]
+) => {
+  for (let index = 0; index < attempts.length; index += 1) {
+    appendAttemptItem(result, attempts[index], index)
+  }
+}
 
-    if (!attempts.length) {
-      if (nextList.length > 0) {
-        nextList.forEach((nextItem: NextListItem) => {
-          const displayName = buildNextListDisplayName(nextItem)
-          result.push({
-            name: displayName,
-            status: 'not-recognized'
-          })
-        })
-      }
-      return result
+const splitAttemptsIntoRounds = (
+  attempts: RecognitionAttempt[],
+  nextListNames: ReadonlySet<string>,
+  nextIndexMap: ReadonlyMap<string, number>
+): RoundAttempt[][] => {
+  const rounds: RoundAttempt[][] = [[]]
+  let currentRound = 0
+  let expectedNextIndex = 0
+
+  for (let index = 0; index < attempts.length; index += 1) {
+    const attempt = attempts[index]
+    const matchName = resolveRecognitionNextListName(attempt, nextListNames)
+    const nextIndex = nextIndexMap.get(matchName)
+    const hasRoundData = rounds[currentRound].length > 0
+
+    // Sequence rollback in next_list means a new recognition round.
+    if (hasRoundData && nextIndex != null && nextIndex < expectedNextIndex) {
+      rounds.push([])
+      currentRound += 1
+      expectedNextIndex = 0
     }
 
-    const nextEntries: NextEntry[] = nextList.map((nextItem: NextListItem) => {
-      const displayName = buildNextListDisplayName(
-        nextItem,
-        recognitionTargetByNextName.get(nextItem.name),
+    rounds[currentRound].push({ attempt, index, matchName })
+
+    if (nextIndex != null) {
+      expectedNextIndex = nextIndex + 1
+    }
+
+    // Success usually means switching to the next retry round.
+    if (attempt.status === 'success') {
+      rounds.push([])
+      currentRound += 1
+      expectedNextIndex = 0
+    }
+  }
+
+  while (rounds.length > 0 && rounds[rounds.length - 1].length === 0) {
+    rounds.pop()
+  }
+
+  return rounds
+}
+
+const appendRoundItems = (
+  result: MergedRecognitionItem[],
+  roundAttempts: RoundAttempt[],
+  roundIdx: number,
+  useRoundSeparator: boolean,
+  nextEntries: NextEntry[],
+  nextIndexMap: ReadonlyMap<string, number>,
+  nextDisplayMap: ReadonlyMap<string, string>
+) => {
+  if (useRoundSeparator) {
+    result.push({
+      name: `—— 第 ${roundIdx + 1} 轮 ——`,
+      status: 'not-recognized',
+      isRoundSeparator: true,
+      roundIndex: roundIdx + 1,
+    })
+  }
+
+  const roundBuckets = new Map<string, RoundAttempt[]>()
+  const outOfNextList: RoundAttempt[] = []
+
+  for (const roundAttempt of roundAttempts) {
+    const matchName = roundAttempt.matchName
+    if (!nextIndexMap.has(matchName)) {
+      outOfNextList.push(roundAttempt)
+      continue
+    }
+    const bucket = roundBuckets.get(matchName)
+    if (bucket) {
+      bucket.push(roundAttempt)
+    } else {
+      roundBuckets.set(matchName, [roundAttempt])
+    }
+  }
+
+  const consumedBucketCountByName = new Map<string, number>()
+
+  for (const nextEntry of nextEntries) {
+    const bucket = roundBuckets.get(nextEntry.name)
+    const consumedCount = consumedBucketCountByName.get(nextEntry.name) ?? 0
+    const matched = bucket?.[consumedCount]
+
+    if (matched) {
+      consumedBucketCountByName.set(nextEntry.name, consumedCount + 1)
+      const matchedDisplayName = buildNextListDisplayName(
+        nextEntry.nextItem,
+        matched.attempt.name,
         ''
       )
-      return {
-        name: nextItem.name,
-        displayName,
-        nextItem,
-      }
-    })
-
-    // next_list 为空时，保持原始尝试序列展示。
-    if (nextEntries.length === 0) {
-      attempts.forEach((attempt, index) => {
-        result.push({
-          name: attempt.name,
-          status: attempt.status,
-          attemptIndex: index,
-          attempt,
-        })
-      })
-      return result
+      appendAttemptItem(result, matched.attempt, matched.index, matchedDisplayName)
+      continue
     }
 
-    // 多轮识别：先按尝试序列切分轮次，再在轮内按 next_list 顺序全量展示。
-    const nextIndexMap = new Map<string, number>()
-    const nextDisplayMap = new Map<string, string>()
-    nextEntries.forEach((nextEntry: NextEntry, idx: number) => {
-      if (!nextIndexMap.has(nextEntry.name)) {
-        nextIndexMap.set(nextEntry.name, idx)
-        nextDisplayMap.set(nextEntry.name, nextEntry.displayName)
-      }
+    result.push({
+      name: nextEntry.displayName,
+      status: 'not-recognized',
     })
+  }
 
-    type RoundAttempt = {
-      attempt: RecognitionAttempt
-      index: number
-      matchName: string
+  const tail: RoundAttempt[] = [...outOfNextList]
+  for (const [name, bucket] of roundBuckets) {
+    const consumedCount = consumedBucketCountByName.get(name) ?? 0
+    for (let idx = consumedCount; idx < bucket.length; idx += 1) {
+      tail.push(bucket[idx])
     }
-    const rounds: RoundAttempt[][] = [[]]
-    let currentRound = 0
-    let expectedNextIndex = 0
+  }
+  tail.sort((left, right) => left.index - right.index)
 
-    attempts.forEach((attempt, index) => {
-      const matchName = resolveRecognitionNextListName(attempt, nextListNames)
-      const nextIndex = nextIndexMap.get(matchName)
-      const hasRoundData = rounds[currentRound].length > 0
+  for (const roundAttempt of tail) {
+    const name = nextDisplayMap.get(roundAttempt.matchName) ?? roundAttempt.attempt.name
+    appendAttemptItem(result, roundAttempt.attempt, roundAttempt.index, name)
+  }
+}
 
-      // 命中 next_list 顺序回退时，认为进入新一轮。
-      if (hasRoundData && nextIndex != null && nextIndex < expectedNextIndex) {
-        rounds.push([])
-        currentRound += 1
-        expectedNextIndex = 0
-      }
+const buildMergedRecognitionItems = (node: NodeInfo): MergedRecognitionItem[] => {
+  const result: MergedRecognitionItem[] = []
 
-      rounds[currentRound].push({ attempt, index, matchName })
+  const attempts = buildNodeRecognitionAttempts(node)
+  const nextList: NextListItem[] = node.next_list ?? []
 
-      if (nextIndex != null) {
-        expectedNextIndex = nextIndex + 1
-      }
-
-      // 命中成功后通常进入下一轮（同节点重试场景）。
-      if (attempt.status === 'success') {
-        rounds.push([])
-        currentRound += 1
-        expectedNextIndex = 0
-      }
-    })
-
-    while (rounds.length > 0 && rounds[rounds.length - 1].length === 0) {
-      rounds.pop()
-    }
-
-    const useRoundSeparator = rounds.length > 1
-
-    rounds.forEach((roundAttempts, roundIdx) => {
-      if (useRoundSeparator) {
+  if (!attempts.length) {
+    if (nextList.length > 0) {
+      for (const nextItem of nextList) {
         result.push({
-          name: `—— 第 ${roundIdx + 1} 轮 ——`,
-          status: 'not-recognized',
-          isRoundSeparator: true,
-          roundIndex: roundIdx + 1,
+          name: buildNextListDisplayName(nextItem),
+          status: 'not-recognized'
         })
       }
-
-      const roundBuckets = new Map<string, RoundAttempt[]>()
-      const outOfNextList: RoundAttempt[] = []
-
-      roundAttempts.forEach((roundAttempt) => {
-        const matchName = roundAttempt.matchName
-        const bucket = roundBuckets.get(matchName)
-        if (bucket) {
-          bucket.push(roundAttempt)
-          return
-        }
-        if (nextIndexMap.has(matchName)) {
-          roundBuckets.set(matchName, [roundAttempt])
-        } else {
-          outOfNextList.push(roundAttempt)
-        }
-      })
-
-      nextEntries.forEach((nextEntry: NextEntry) => {
-        const bucket = roundBuckets.get(nextEntry.name)
-        const matched = bucket?.shift()
-        if (matched) {
-          const matchedDisplayName = buildNextListDisplayName(
-            nextEntry.nextItem,
-            matched.attempt.name,
-            ''
-          )
-          result.push({
-            name: matchedDisplayName,
-            status: matched.attempt.status,
-            attemptIndex: matched.index,
-            attempt: matched.attempt,
-          })
-        } else {
-          result.push({
-            name: nextEntry.displayName,
-            status: 'not-recognized',
-          })
-        }
-      })
-
-      const remainingMatched = [...roundBuckets.values()].flat()
-      const tail = [...outOfNextList, ...remainingMatched].sort((a, b) => a.index - b.index)
-      tail.forEach(({ attempt, index, matchName }) => {
-        const name = nextDisplayMap.get(matchName) ?? attempt.name
-        result.push({
-          name,
-          status: attempt.status,
-          attemptIndex: index,
-          attempt,
-        })
-      })
-    })
-
+    }
     return result
+  }
+
+  const recognitionTargetByNextName = buildRecognitionTargetByNextName(attempts, nextList)
+  const nextEntries: NextEntry[] = nextList.map((nextItem: NextListItem) => {
+    const displayName = buildNextListDisplayName(
+      nextItem,
+      recognitionTargetByNextName.get(nextItem.name),
+      ''
+    )
+    return {
+      name: nextItem.name,
+      displayName,
+      nextItem,
+    }
   })
 
-  const visibleRecognitionList = computed<MergedRecognitionItem[]>(() => {
-    const source = mergedRecognitionList.value
-    if (params.showNotRecognizedNodes.value) return source
-
-    const hasRoundSeparators = source.some((item: MergedRecognitionItem) => item.isRoundSeparator)
-    if (!hasRoundSeparators) {
-      return source.filter((item: MergedRecognitionItem) => item.status !== 'not-recognized')
-    }
-
-    const result: MergedRecognitionItem[] = []
-    let currentSeparator: MergedRecognitionItem | null = null
-    let currentVisibleItems: MergedRecognitionItem[] = []
-
-    const flushRound = () => {
-      if (currentVisibleItems.length === 0) return
-      if (currentSeparator) result.push(currentSeparator)
-      result.push(...currentVisibleItems)
-    }
-
-    source.forEach((item: MergedRecognitionItem) => {
-      if (item.isRoundSeparator) {
-        flushRound()
-        currentSeparator = item
-        currentVisibleItems = []
-        return
-      }
-      if (item.status !== 'not-recognized') {
-        currentVisibleItems.push(item)
-      }
-    })
-
-    flushRound()
+  // Keep the original attempt sequence when next_list is empty.
+  if (nextEntries.length === 0) {
+    appendAttemptsInOriginalOrder(result, attempts)
     return result
+  }
+
+  const nextListNames = new Set<string>(nextList.map((item: NextListItem) => item.name))
+  const nextIndexMap = new Map<string, number>()
+  const nextDisplayMap = new Map<string, string>()
+  nextEntries.forEach((nextEntry: NextEntry, idx: number) => {
+    if (!nextIndexMap.has(nextEntry.name)) {
+      nextIndexMap.set(nextEntry.name, idx)
+      nextDisplayMap.set(nextEntry.name, nextEntry.displayName)
+    }
   })
+
+  const rounds = splitAttemptsIntoRounds(attempts, nextListNames, nextIndexMap)
+  const useRoundSeparator = rounds.length > 1
+
+  for (let roundIdx = 0; roundIdx < rounds.length; roundIdx += 1) {
+    appendRoundItems(
+      result,
+      rounds[roundIdx],
+      roundIdx,
+      useRoundSeparator,
+      nextEntries,
+      nextIndexMap,
+      nextDisplayMap
+    )
+  }
+
+  return result
+}
+
+const buildVisibleRecognitionItems = (
+  source: MergedRecognitionItem[],
+  showNotRecognizedNodes: boolean
+): MergedRecognitionItem[] => {
+  if (showNotRecognizedNodes) return source
+
+  const hasRoundSeparators = source.some((item: MergedRecognitionItem) => item.isRoundSeparator)
+  if (!hasRoundSeparators) {
+    return source.filter((item: MergedRecognitionItem) => item.status !== 'not-recognized')
+  }
+
+  const result: MergedRecognitionItem[] = []
+  let currentSeparator: MergedRecognitionItem | null = null
+  let currentVisibleItems: MergedRecognitionItem[] = []
+
+  const flushRound = () => {
+    if (currentVisibleItems.length === 0) return
+    if (currentSeparator) result.push(currentSeparator)
+    result.push(...currentVisibleItems)
+  }
+
+  for (const item of source) {
+    if (item.isRoundSeparator) {
+      flushRound()
+      currentSeparator = item
+      currentVisibleItems = []
+      continue
+    }
+    if (item.status !== 'not-recognized') {
+      currentVisibleItems.push(item)
+    }
+  }
+
+  flushRound()
+  return result
+}
+
+export const useMergedRecognitionList = (params: UseMergedRecognitionListParams) => {
+  const mergedRecognitionList = computed<MergedRecognitionItem[]>(
+    () => buildMergedRecognitionItems(params.node.value)
+  )
+
+  const visibleRecognitionList = computed<MergedRecognitionItem[]>(
+    () => buildVisibleRecognitionItems(
+      mergedRecognitionList.value,
+      params.showNotRecognizedNodes.value
+    )
+  )
 
   return {
     mergedRecognitionList,

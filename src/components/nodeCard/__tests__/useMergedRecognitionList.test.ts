@@ -115,4 +115,31 @@ describe('useMergedRecognitionList', () => {
 
     expect(visibleRecognitionList.value).toEqual([])
   })
+
+  it('keeps out-of-next-list attempts in stable tail order within a round', () => {
+    const nodeRef = ref(makeNode({
+      next_list: [
+        { name: 'A', anchor: false, jump_back: false },
+        { name: 'B', anchor: false, jump_back: false },
+      ],
+      node_flow: [
+        makeRecognitionFlowItem(0, 'C', 'failed', '2026-04-06 00:00:00.100'),
+        makeRecognitionFlowItem(1, 'A', 'failed', '2026-04-06 00:00:00.200'),
+        makeRecognitionFlowItem(2, 'D', 'failed', '2026-04-06 00:00:00.300'),
+      ],
+    }))
+    const showNotRecognizedNodes = ref(true)
+
+    const { visibleRecognitionList } = useMergedRecognitionList({
+      node: nodeRef,
+      showNotRecognizedNodes,
+    })
+
+    expect(visibleRecognitionList.value).toMatchObject([
+      { status: 'failed', attemptIndex: 1 },
+      { status: 'not-recognized' },
+      { status: 'failed', attemptIndex: 0 },
+      { status: 'failed', attemptIndex: 2 },
+    ])
+  })
 })

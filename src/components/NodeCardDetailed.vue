@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, toRef, watch } from 'vue'
+import { computed, toRef } from 'vue'
 import { NCard, NButton, NFlex, NText } from 'naive-ui'
 import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined } from '@vicons/antd'
 import type { NodeInfo, MergedRecognitionItem } from '../types'
@@ -8,6 +8,7 @@ import { getFlowItemButtonType, getFlowItemShortLabel } from '../utils/flowLabel
 import TaskDocHoverPopover from './TaskDocHoverPopover.vue'
 import SafePreviewImage from './SafePreviewImage.vue'
 import { useNodeCardFlowRows } from './nodeCard/useNodeCardFlowRows'
+import { useFlowItemExpandState } from './nodeCard/useFlowItemExpandState'
 
 const emit = defineEmits<{
   'select-action': [node: NodeInfo]
@@ -37,44 +38,26 @@ const DETAIL_INDENT_PX = 14
 
 const toDetailOffset = (depth: number): string => `${depth * DETAIL_INDENT_PX}px`
 
-const expandedNestedRecognitionItems = ref<Map<string, boolean>>(new Map())
+const nodeId = computed(() => props.node.node_id)
+const forceExpandRelatedWhileRunning = toRef(props, 'forceExpandRelatedWhileRunning')
 
-const isNestedRecognitionFlowItemExpanded = (flowItemId: string): boolean => {
-  if (props.forceExpandRelatedWhileRunning) return true
-  const value = expandedNestedRecognitionItems.value.get(flowItemId)
-  if (value !== undefined) return value
-  return !(props.defaultCollapseNestedRecognition ?? true)
-}
+const {
+  isExpanded: isNestedRecognitionFlowItemExpanded,
+  toggle: toggleNestedRecognitionFlowItemExpand,
+} = useFlowItemExpandState({
+  forceExpand: forceExpandRelatedWhileRunning,
+  defaultCollapsed: toRef(props, 'defaultCollapseNestedRecognition'),
+  resetWhen: nodeId,
+})
 
-const toggleNestedRecognitionFlowItemExpand = (flowItemId: string) => {
-  expandedNestedRecognitionItems.value.set(flowItemId, !isNestedRecognitionFlowItemExpanded(flowItemId))
-}
-
-const expandedActionFlowItems = ref<Map<string, boolean>>(new Map())
-
-const isActionFlowItemExpanded = (flowItemId: string): boolean => {
-  if (props.forceExpandRelatedWhileRunning) return true
-  const value = expandedActionFlowItems.value.get(flowItemId)
-  if (value !== undefined) return value
-  return !(props.defaultCollapseNestedActionNodes ?? true)
-}
-
-const toggleActionFlowItem = (flowItemId: string) => {
-  expandedActionFlowItems.value.set(flowItemId, !isActionFlowItemExpanded(flowItemId))
-}
-
-watch(() => props.node.node_id, () => {
-  expandedNestedRecognitionItems.value.clear()
-  expandedActionFlowItems.value.clear()
-}, { flush: 'sync' })
-
-watch(() => props.defaultCollapseNestedRecognition, () => {
-  expandedNestedRecognitionItems.value.clear()
-}, { flush: 'sync' })
-
-watch(() => props.defaultCollapseNestedActionNodes, () => {
-  expandedActionFlowItems.value.clear()
-}, { flush: 'sync' })
+const {
+  isExpanded: isActionFlowItemExpanded,
+  toggle: toggleActionFlowItem,
+} = useFlowItemExpandState({
+  forceExpand: forceExpandRelatedWhileRunning,
+  defaultCollapsed: toRef(props, 'defaultCollapseNestedActionNodes'),
+  resetWhen: nodeId,
+})
 
 const {
   actionTimelineRows,
