@@ -136,7 +136,6 @@ const mergedRecognitionList = computed<MergedRecognitionItem[]>(() => {
         status: attempt.status,
         attemptIndex: index,
         attempt,
-        hasNestedNodes: !!(attempt.nested_nodes && attempt.nested_nodes.length > 0),
       })
     })
     return result
@@ -230,7 +229,6 @@ const mergedRecognitionList = computed<MergedRecognitionItem[]>(() => {
           status: matched.attempt.status,
           attemptIndex: matched.index,
           attempt: matched.attempt,
-          hasNestedNodes: !!(matched.attempt.nested_nodes && matched.attempt.nested_nodes.length > 0),
         })
       } else {
         result.push({
@@ -250,7 +248,6 @@ const mergedRecognitionList = computed<MergedRecognitionItem[]>(() => {
         status: attempt.status,
         attemptIndex: index,
         attempt,
-        hasNestedNodes: !!(attempt.nested_nodes && attempt.nested_nodes.length > 0),
       })
     })
   })

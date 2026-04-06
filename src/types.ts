@@ -134,7 +134,6 @@ export interface MergedRecognitionItem {
   roundIndex?: number
   attemptIndex?: number  // 在 recognition flow 中的索引
   attempt?: RecognitionAttempt  // 原始 attempt 对象
-  hasNestedNodes?: boolean
 }
 
 // 动作详情

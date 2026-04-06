@@ -1752,6 +1752,87 @@ export class LogParser {
       if (items.some(item => item.status === 'running')) return 'running'
       return 'success'
     }
+    const createActionRootFlowItem = (params: {
+      actionId: number
+      name: string
+      status: UnifiedFlowItem['status']
+      ts: string
+      endTs?: string
+      actionDetails?: NodeInfo['action_details']
+      errorImage?: string
+    }): UnifiedFlowItem => {
+      return {
+        id: `node.action.${params.actionId}`,
+        type: 'action',
+        name: params.name,
+        status: params.status,
+        ts: params.ts,
+        end_ts: params.endTs,
+        action_id: params.actionId,
+        action_details: params.actionDetails,
+        error_image: params.errorImage,
+      }
+    }
+    const composePipelineNodeFlow = (params: {
+      topLevelRecognitions: RecognitionAttempt[]
+      actionLevelRecognitions: RecognitionAttempt[]
+      nestedActionGroups: NestedActionGroup[]
+      waitFreezesFlow: UnifiedFlowItem[]
+      createActionRoot: (actionFlow: UnifiedFlowItem[]) => UnifiedFlowItem | null
+    }) => {
+      const recognitionFlow = buildRecognitionFlowItems(params.topLevelRecognitions)
+      const actionFlow = buildActionFlowItems(params.actionLevelRecognitions, params.nestedActionGroups)
+      const {
+        recognitionFlow: scopedRecognitionFlow,
+        actionFlow: scopedActionFlow,
+        actionScopeWaitFreezes,
+        unassignedContextWaitFreezes,
+      } = splitAndAttachWaitFreezesFlowItems(
+        recognitionFlow,
+        actionFlow,
+        params.waitFreezesFlow
+      )
+      const actionScopeWaitFreezesAll = [...actionScopeWaitFreezes, ...unassignedContextWaitFreezes]
+
+      const actionRootBase = params.createActionRoot(actionFlow)
+      const actionRoot: UnifiedFlowItem | null = actionRootBase
+        ? {
+            ...actionRootBase,
+            children: scopedActionFlow.length > 0
+              ? sortFlowItemsByTimestamp([
+                  ...(actionRootBase.children ?? []),
+                  ...scopedActionFlow,
+                ])
+              : actionRootBase.children,
+          }
+        : null
+
+      const waitFreezesPlacement = partitionActionScopeWaitFreezes(
+        actionScopeWaitFreezesAll,
+        actionRoot?.ts,
+        actionRoot?.end_ts,
+        actionRoot?.status,
+      )
+      if (actionRoot && waitFreezesPlacement.inside.length > 0) {
+        actionRoot.children = sortFlowItemsByTimestamp([
+          ...(actionRoot.children ?? []),
+          ...waitFreezesPlacement.inside,
+        ])
+      }
+
+      const nodeFlow = [
+        ...scopedRecognitionFlow,
+        ...waitFreezesPlacement.before,
+        ...(!actionRoot ? waitFreezesPlacement.inside : []),
+        ...(actionRoot ? [actionRoot] : []),
+        ...waitFreezesPlacement.after,
+      ]
+
+      return {
+        nodeFlow,
+        actionFlow,
+      }
+    }
     const refreshActivePipelineNodePreview = (timestamp: string) => {
       const activeNode = getActivePipelineNode()
       if (!activeNode) return
@@ -1782,73 +1863,48 @@ export class LogParser {
           }]
         : []
 
-      const recognitionFlow = buildRecognitionFlowItems(topLevelRecognitions)
-      const actionFlow = buildActionFlowItems(actionRecognitions, runtimeNestedActionGroups)
-      const waitFreezesFlow = buildWaitFreezesFlowItems()
-      const {
-        recognitionFlow: scopedRecognitionFlow,
-        actionFlow: scopedActionFlow,
-        actionScopeWaitFreezes,
-        unassignedContextWaitFreezes,
-      } = splitAndAttachWaitFreezesFlowItems(recognitionFlow, actionFlow, waitFreezesFlow)
-      const actionScopeWaitFreezesAll = [...actionScopeWaitFreezes, ...unassignedContextWaitFreezes]
       const runtimeActionState = getLatestActionRuntimeState()
-      const inferredActionStatus = summarizeActionFlowStatus(actionFlow)
-
-      const actionRootStatus = runtimeActionState?.status ?? inferredActionStatus
       const resolvedActionId =
         runtimeActionState?.action_id ??
         activeNode.action_details?.action_id ??
         activeNode.node_details?.action_id ??
         activeNode.node_id
-      const runtimeActionErrorImage = actionRootStatus === 'failed'
-        ? this.findErrorImageByNames(nowTimestamp, [
-            runtimeActionState?.name,
-            activeNode.action_details?.name,
-            activeNode.node_details?.name,
-            activeNode.reco_details?.name,
-            activeNode.name,
-          ])
-        : undefined
-      const actionRoot: UnifiedFlowItem | null = actionRootStatus
-        ? {
-            id: `node.action.${resolvedActionId}`,
-            type: 'action',
+      const composedFlow = composePipelineNodeFlow({
+        topLevelRecognitions,
+        actionLevelRecognitions: actionRecognitions,
+        nestedActionGroups: runtimeNestedActionGroups,
+        waitFreezesFlow: buildWaitFreezesFlowItems(),
+        createActionRoot: (actionFlow) => {
+          const inferredActionStatus = summarizeActionFlowStatus(actionFlow)
+          const actionRootStatus = runtimeActionState?.status ?? inferredActionStatus
+          if (!actionRootStatus) return null
+
+          const runtimeActionErrorImage = actionRootStatus === 'failed'
+            ? this.findErrorImageByNames(nowTimestamp, [
+                runtimeActionState?.name,
+                activeNode.action_details?.name,
+                activeNode.node_details?.name,
+                activeNode.reco_details?.name,
+                activeNode.name,
+              ])
+            : undefined
+
+          return createActionRootFlowItem({
+            actionId: resolvedActionId,
             name:
               runtimeActionState?.name ||
               activeNode.action_details?.name ||
               activeNode.name,
             status: actionRootStatus,
             ts: runtimeActionState?.ts || activeNode.action_details?.ts || activeNode.ts,
-            end_ts: runtimeActionState?.end_ts || activeNode.action_details?.end_ts || nowTimestamp,
-            action_id: resolvedActionId,
-            action_details: activeNode.action_details,
-            error_image: runtimeActionErrorImage,
-            children: [...scopedActionFlow].length > 0
-              ? sortFlowItemsByTimestamp([...scopedActionFlow])
-              : undefined,
-          }
-        : null
-      const waitFreezesPlacement = partitionActionScopeWaitFreezes(
-        actionScopeWaitFreezesAll,
-        actionRoot?.ts,
-        actionRoot?.end_ts,
-        actionRoot?.status,
-      )
-      if (actionRoot && waitFreezesPlacement.inside.length > 0) {
-        actionRoot.children = sortFlowItemsByTimestamp([
-          ...(actionRoot.children ?? []),
-          ...waitFreezesPlacement.inside,
-        ])
-      }
+            endTs: runtimeActionState?.end_ts || activeNode.action_details?.end_ts || nowTimestamp,
+            actionDetails: activeNode.action_details,
+            errorImage: runtimeActionErrorImage,
+          })
+        },
+      })
 
-      activeNode.node_flow = [
-        ...scopedRecognitionFlow,
-        ...waitFreezesPlacement.before,
-        ...(!actionRoot ? waitFreezesPlacement.inside : []),
-        ...(actionRoot ? [actionRoot] : []),
-        ...waitFreezesPlacement.after,
-      ]
+      activeNode.node_flow = composedFlow.nodeFlow
 
       const fallbackRecoDetails =
         topLevelRecognitions.length > 0
@@ -2388,19 +2444,6 @@ export class LogParser {
                       ]
                     : []
                 )
-            const actionFlow = buildActionFlowItems(
-              nestedRecognitionInAction,
-              resolvedNestedActionGroups
-            )
-            const recognitionFlow = buildRecognitionFlowItems(scopedAttachResult.topLevelAttempts)
-            const waitFreezesFlow = buildWaitFreezesFlowItems()
-            const {
-              recognitionFlow: scopedRecognitionFlow,
-              actionFlow: scopedActionFlow,
-              actionScopeWaitFreezes,
-              unassignedContextWaitFreezes,
-            } = splitAndAttachWaitFreezesFlowItems(recognitionFlow, actionFlow, waitFreezesFlow)
-            const actionScopeWaitFreezesAll = [...actionScopeWaitFreezes, ...unassignedContextWaitFreezes]
             const fallbackRecoDetails =
               details.reco_details ||
               (scopedAttachResult.topLevelAttempts.length > 0
@@ -2408,54 +2451,41 @@ export class LogParser {
                 : undefined)
             const mergedActionDetails = withActionTimestamps(details.action_details, actionStartTimestamp, actionEndTimestamp, endTimestamp)
             const resolvedActionId = mergedActionDetails?.action_id ?? actionId ?? nodeId
-            const hasActionRoot = !!mergedActionDetails || actionFlow.length > 0
-            const actionStatus: 'success' | 'failed' = mergedActionDetails
-              ? (mergedActionDetails.success ? 'success' : 'failed')
-              : (message === 'Node.PipelineNode.Succeeded' ? 'success' : 'failed')
-            const resolvedActionErrorImage = actionStatus === 'failed'
-              ? this.findErrorImageByNames(event.timestamp, [
-                  mergedActionDetails?.name,
-                  details.action_details?.name,
-                  details.node_details?.name,
-                  details.reco_details?.name,
-                  nodeName,
-                ])
-              : undefined
-            const actionRoot: UnifiedFlowItem | null = hasActionRoot
-              ? {
-                  id: `node.action.${resolvedActionId}`,
-                  type: 'action',
+            const composedFlow = composePipelineNodeFlow({
+              topLevelRecognitions: scopedAttachResult.topLevelAttempts,
+              actionLevelRecognitions: nestedRecognitionInAction,
+              nestedActionGroups: resolvedNestedActionGroups,
+              waitFreezesFlow: buildWaitFreezesFlowItems(),
+              createActionRoot: (actionFlow) => {
+                const hasActionRoot = !!mergedActionDetails || actionFlow.length > 0
+                if (!hasActionRoot) return null
+
+                const actionStatus: 'success' | 'failed' = mergedActionDetails
+                  ? (mergedActionDetails.success ? 'success' : 'failed')
+                  : (message === 'Node.PipelineNode.Succeeded' ? 'success' : 'failed')
+                const resolvedActionErrorImage = actionStatus === 'failed'
+                  ? this.findErrorImageByNames(event.timestamp, [
+                      mergedActionDetails?.name,
+                      details.action_details?.name,
+                      details.node_details?.name,
+                      details.reco_details?.name,
+                      nodeName,
+                    ])
+                  : undefined
+
+                return createActionRootFlowItem({
+                  actionId: resolvedActionId,
                   name: mergedActionDetails?.name || this.stringPool.intern(nodeName),
                   status: actionStatus,
                   ts: mergedActionDetails?.ts || mergedActionDetails?.end_ts || endTimestamp,
-                  end_ts: mergedActionDetails?.end_ts,
-                  action_id: resolvedActionId,
-                  action_details: mergedActionDetails,
-                  error_image: resolvedActionErrorImage,
-                  children: [...scopedActionFlow].length > 0
-                    ? sortFlowItemsByTimestamp([...scopedActionFlow])
-                    : undefined,
-                }
-              : null
-            const waitFreezesPlacement = partitionActionScopeWaitFreezes(
-              actionScopeWaitFreezesAll,
-              actionRoot?.ts,
-              actionRoot?.end_ts,
-              actionRoot?.status,
-            )
-            if (actionRoot && waitFreezesPlacement.inside.length > 0) {
-              actionRoot.children = sortFlowItemsByTimestamp([
-                ...(actionRoot.children ?? []),
-                ...waitFreezesPlacement.inside,
-              ])
-            }
-            const nodeFlow = [
-              ...scopedRecognitionFlow,
-              ...waitFreezesPlacement.before,
-              ...(!actionRoot ? waitFreezesPlacement.inside : []),
-              ...(actionRoot ? [actionRoot] : []),
-              ...waitFreezesPlacement.after,
-            ]
+                  endTs: mergedActionDetails?.end_ts,
+                  actionDetails: mergedActionDetails,
+                  errorImage: resolvedActionErrorImage,
+                })
+              },
+            })
+            const nodeFlow = composedFlow.nodeFlow
+            const actionFlow = composedFlow.actionFlow
 
             const resolvedNextList = toNextListItems(currentNextList)
             let nodeStatus: NodeInfo['status'] = pipelineStatus
