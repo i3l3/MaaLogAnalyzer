@@ -161,6 +161,10 @@ const resolveCompletionStatus = (phase: KnownMaaPhase): 'success' | 'failed' => 
   return phase === 'Succeeded' ? 'success' : 'failed'
 }
 
+const resolveTerminalCompletionStatus = (phase: TaskTerminalPhase): 'success' | 'failed' => {
+  return phase === 'Succeeded' ? 'success' : 'failed'
+}
+
 /**
  * 强制复制字符串，避免 V8 sliced string 长时间持有整段日志 backing store。
  * 说明：日志很大时，子串若不复制可能导致旧日志内容在多次重载后难以及时释放。
@@ -337,6 +341,7 @@ export class LogParser {
 
   resetParsedEvents(): void {
     this.events = []
+    cachedMaaMessageMeta.clear()
     this.taskProcessMap.clear()
     this.taskThreadMap.clear()
     this.lastEventBySignature.clear()
@@ -864,7 +869,7 @@ export class LogParser {
     type ScopedPipelineNodeFinalizeHandler = (
       taskId: number | null,
       details: Record<string, any>,
-      phase: KnownMaaPhase,
+      phase: TaskTerminalPhase,
       timestamp: string
     ) => void
     type ScopedNodeDispatchConfig = {
@@ -2557,10 +2562,10 @@ export class LogParser {
     const finalizeSubTaskPipelineNodeEvent = (
       subTaskId: number,
       details: Record<string, any>,
-      phase: KnownMaaPhase,
+      phase: TaskTerminalPhase,
       timestamp: string
     ) => {
-      const subTaskPipelineStatus = resolveCompletionStatus(phase)
+      const subTaskPipelineStatus = resolveTerminalCompletionStatus(phase)
       const nodeId = details.node_id
       const endTimestamp = this.stringPool.intern(timestamp)
       const startTimestamp = nodeId != null
@@ -2734,13 +2739,13 @@ export class LogParser {
     const finalizeTaskPipelineNodeEvent = (
       taskId: number,
       details: Record<string, any>,
-      phase: KnownMaaPhase,
+      phase: TaskTerminalPhase,
       timestamp: string
     ) => {
       const nodeId = details.node_id
       if (!nodeId) return
 
-      const pipelineStatus = resolveCompletionStatus(phase)
+      const pipelineStatus = resolveTerminalCompletionStatus(phase)
       settleCurrentNodeRuntimeStates(pipelineStatus, timestamp)
 
       const nodeName = details.name || ''
@@ -2896,7 +2901,7 @@ export class LogParser {
         taskId,
         details,
         timestamp,
-        resolveCompletionStatus(phase),
+        resolveTerminalCompletionStatus(phase),
         eventOrder,
         onAttempt
       )
@@ -2978,15 +2983,18 @@ export class LogParser {
       timestamp: string,
       eventOrder: number
     ): void => {
-      const isStarting = phase === 'Starting'
-      if (isStarting) {
-        if (subTaskId != null && details.action_id != null) {
-          const actionKey = scopedKey(subTaskId, details.action_id)
+      if (subTaskId == null) {
+        refreshActivePipelineNodePreview(timestamp)
+        return
+      }
+      const actionId = details.action_id as number | undefined
+      if (phase === 'Starting') {
+        if (actionId != null) {
+          const actionKey = scopedKey(subTaskId, actionId)
           subTaskActionStartTimes.set(actionKey, this.stringPool.intern(timestamp))
           subTaskActionStartOrders.set(actionKey, eventOrder)
         }
-      } else if (subTaskId != null) {
-        const actionId = details.action_id
+      } else {
         const actionKey = actionId != null ? scopedKey(subTaskId, actionId) : null
         const endTimestamp = this.stringPool.intern(timestamp)
         const startTimestamp = actionKey
@@ -2997,8 +3005,8 @@ export class LogParser {
           subTaskActionEndOrders.set(actionKey, eventOrder)
         }
         subTasks.addAction(subTaskId, {
-          action_id: details.action_id,
-          name: this.stringPool.intern(details.name || ''),
+          action_id: actionId,
+          name: resolveActionEventName(details),
           ts: startTimestamp,
           end_ts: endTimestamp,
           status: resolveRuntimeStatusFromPhase(phase),
@@ -3115,7 +3123,7 @@ export class LogParser {
       return (
         taskId: number | null,
         details: Record<string, any>,
-        phase: KnownMaaPhase,
+        phase: TaskTerminalPhase,
         timestamp: string
       ): void => {
         const scopedTaskId = resolveScopedTaskId(params.fixedTaskId, taskId)
@@ -3156,7 +3164,7 @@ export class LogParser {
         taskId,
         details,
         timestamp,
-        resolveCompletionStatus(phase),
+        resolveTerminalCompletionStatus(phase),
         eventOrder,
         subTasks.consumeRecognitions(taskId),
         dispatchPendingRecognition,
@@ -3171,17 +3179,19 @@ export class LogParser {
       details: Record<string, any>,
       timestamp: string
     ): void => {
-      if (subTaskId != null) {
-        if (phase === 'Starting') {
-          handleSubTaskActionNodeStartingEvent(subTaskId, details, timestamp)
-        } else {
-          handleSubTaskActionNodeFinishedEvent(
-            subTaskId,
-            details,
-            timestamp,
-            resolveCompletionStatus(phase)
-          )
-        }
+      if (subTaskId == null) {
+        refreshActivePipelineNodePreview(timestamp)
+        return
+      }
+      if (phase === 'Starting') {
+        handleSubTaskActionNodeStartingEvent(subTaskId, details, timestamp)
+      } else {
+        handleSubTaskActionNodeFinishedEvent(
+          subTaskId,
+          details,
+          timestamp,
+          resolveTerminalCompletionStatus(phase)
+        )
       }
       refreshActivePipelineNodePreview(timestamp)
     }
