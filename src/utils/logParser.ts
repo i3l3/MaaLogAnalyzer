@@ -130,15 +130,6 @@ const parseMaaMessageMeta = (message: string): MaaMessageMeta => {
   }
 }
 
-const cachedMaaMessageMeta = new Map<string, MaaMessageMeta>()
-const getCachedMaaMessageMeta = (message: string): MaaMessageMeta => {
-  const cached = cachedMaaMessageMeta.get(message)
-  if (cached) return cached
-  const parsed = parseMaaMessageMeta(message)
-  cachedMaaMessageMeta.set(message, parsed)
-  return parsed
-}
-
 const toKnownMaaPhase = (phase: MaaPhase): KnownMaaPhase | null => {
   if (phase === 'Unknown') return null
   return phase
@@ -162,7 +153,7 @@ const resolveCompletionStatus = (phase: KnownMaaPhase): 'success' | 'failed' => 
 }
 
 const resolveTerminalCompletionStatus = (phase: TaskTerminalPhase): 'success' | 'failed' => {
-  return phase === 'Succeeded' ? 'success' : 'failed'
+  return resolveCompletionStatus(phase)
 }
 
 /**
@@ -300,6 +291,7 @@ class SubTaskCollector {
 
 export class LogParser {
   private events: EventNotification[] = []
+  private messageMetaCache = new Map<string, MaaMessageMeta>()
   private stringPool = new StringPool()
   private eventTokenPool = new Map<string, string>()
   private taskProcessMap = new Map<number, string>()
@@ -341,7 +333,7 @@ export class LogParser {
 
   resetParsedEvents(): void {
     this.events = []
-    cachedMaaMessageMeta.clear()
+    this.messageMetaCache.clear()
     this.taskProcessMap.clear()
     this.taskThreadMap.clear()
     this.lastEventBySignature.clear()
@@ -350,6 +342,14 @@ export class LogParser {
     this.eventTokenPool.clear()
     this.syntheticLineNumber = 1
     this.stringPool.clear()
+  }
+
+  private getCachedMaaMessageMeta(message: string): MaaMessageMeta {
+    const cached = this.messageMetaCache.get(message)
+    if (cached) return cached
+    const parsed = parseMaaMessageMeta(message)
+    this.messageMetaCache.set(message, parsed)
+    return parsed
   }
 
   private pruneDedupSignatures(currentTimestampMs: number): void {
@@ -418,7 +418,7 @@ export class LogParser {
       })
     }
 
-    const eventMeta = getCachedMaaMessageMeta(event.message)
+    const eventMeta = this.getCachedMaaMessageMeta(event.message)
     const taskLifecyclePhase = resolveTaskLifecyclePhase(eventMeta)
     if (taskLifecyclePhase === 'Starting' && event.details.task_id) {
       if (!this.taskProcessMap.has(event.details.task_id)) {
@@ -696,7 +696,7 @@ export class LogParser {
     for (let i = 0; i < this.events.length; i++) {
       const event = this.events[i]
       const { message, details } = event
-      const meta = getCachedMaaMessageMeta(message)
+      const meta = this.getCachedMaaMessageMeta(message)
       const taskLifecyclePhase = resolveTaskLifecyclePhase(meta)
 
       if (taskLifecyclePhase === 'Starting') {
@@ -774,6 +774,7 @@ export class LogParser {
 
     if (consume) {
       this.events = []
+      this.messageMetaCache.clear()
       this.lastEventBySignature.clear()
       this.dedupSignatureTimeline = []
       this.dedupSignatureTimelineHead = 0
@@ -920,6 +921,12 @@ export class LogParser {
     const recognitionOrderMeta = new WeakMap<RecognitionAttempt, { startSeq: number; endSeq: number }>()
 
     const scopedKey = (taskId: number, id: number): string => `${taskId}:${id}`
+    const resolveSubTaskActionKey = (
+      subTaskId: number,
+      actionId: number | null | undefined
+    ): string | null => {
+      return actionId != null ? scopedKey(subTaskId, actionId) : null
+    }
     const getOrCreateTaskNodeAggregation = (taskId: number): TaskScopedNodeAggregation => {
       const existing = taskScopedNodeAggregationByTaskId.get(taskId)
       if (existing) return existing
@@ -1256,6 +1263,32 @@ export class LogParser {
       }
       subTaskSnapshots.set(taskId, created)
       return created
+    }
+    const applySubTaskSnapshotStarting = (
+      snapshot: SubTaskSnapshot,
+      details: Record<string, any>,
+      message: string,
+      timestamp: string
+    ) => {
+      snapshot.entry = this.stringPool.intern(details.entry || '')
+      snapshot.hash = this.stringPool.intern(details.hash || '')
+      snapshot.uuid = this.stringPool.intern(details.uuid || '')
+      snapshot.status = 'running'
+      snapshot.ts = this.stringPool.intern(timestamp)
+      snapshot.start_message = this.stringPool.intern(message)
+      snapshot.start_details = markRawTaskDetails(details)
+    }
+    const applySubTaskSnapshotTerminal = (
+      snapshot: SubTaskSnapshot,
+      details: Record<string, any>,
+      message: string,
+      timestamp: string,
+      phase: TaskTerminalPhase
+    ) => {
+      snapshot.status = resolveTaskTerminalStatus(phase)
+      snapshot.end_ts = this.stringPool.intern(timestamp)
+      snapshot.end_message = this.stringPool.intern(message)
+      snapshot.end_details = markRawTaskDetails(details)
     }
     const removeFromActiveRecognitionStack = (taskId: number, recoId: number) => {
       for (let i = activeRecognitionStack.length - 1; i >= 0; i--) {
@@ -2319,7 +2352,7 @@ export class LogParser {
     ) => {
       const actionId = resolveActionNodeEventId(details)
       if (actionId == null) return
-      const actionKey = scopedKey(subTaskId, actionId)
+      const actionKey = resolveSubTaskActionKey(subTaskId, actionId)!
       const startTimestamp = this.stringPool.intern(timestamp)
       subTaskActionNodeStartTimes.set(actionKey, startTimestamp)
       if (!activeSubTaskActionNodes.has(actionKey)) {
@@ -2340,7 +2373,7 @@ export class LogParser {
       status: 'success' | 'failed'
     ) => {
       const actionId = resolveActionNodeEventId(details)
-      const actionKey = actionId != null ? scopedKey(subTaskId, actionId) : null
+      const actionKey = resolveSubTaskActionKey(subTaskId, actionId)
       const actionNodeStartTimestamp = actionKey ? subTaskActionNodeStartTimes.get(actionKey) : undefined
       const actionStartTimestamp = actionKey ? subTaskActionStartTimes.get(actionKey) : undefined
       const actionEndTimestamp = actionKey ? subTaskActionEndTimes.get(actionKey) : undefined
@@ -2572,7 +2605,7 @@ export class LogParser {
         ? (subTaskPipelineNodeStartTimes.get(scopedKey(subTaskId, nodeId)) || endTimestamp)
         : endTimestamp
       const actionId = details.action_details?.action_id ?? details.node_details?.action_id
-      const actionKey = actionId != null ? scopedKey(subTaskId, actionId) : null
+      const actionKey = resolveSubTaskActionKey(subTaskId, actionId)
       const actionStartTimestamp = actionKey ? subTaskActionStartTimes.get(actionKey) : undefined
       const actionEndTimestamp = actionKey ? subTaskActionEndTimes.get(actionKey) : undefined
       const matchedTaskAction = consumeMatchedSubTaskAction(subTaskId, actionId)
@@ -2990,12 +3023,12 @@ export class LogParser {
       const actionId = details.action_id as number | undefined
       if (phase === 'Starting') {
         if (actionId != null) {
-          const actionKey = scopedKey(subTaskId, actionId)
+          const actionKey = resolveSubTaskActionKey(subTaskId, actionId)!
           subTaskActionStartTimes.set(actionKey, this.stringPool.intern(timestamp))
           subTaskActionStartOrders.set(actionKey, eventOrder)
         }
       } else {
-        const actionKey = actionId != null ? scopedKey(subTaskId, actionId) : null
+        const actionKey = resolveSubTaskActionKey(subTaskId, actionId)
         const endTimestamp = this.stringPool.intern(timestamp)
         const startTimestamp = actionKey
           ? (subTaskActionStartTimes.get(actionKey) || endTimestamp)
@@ -3230,18 +3263,9 @@ export class LogParser {
       if (eventTaskId === task.task_id) return
       const snapshot = getOrCreateSubTaskSnapshot(eventTaskId)
       if (phase === 'Starting') {
-        snapshot.entry = this.stringPool.intern(details.entry || '')
-        snapshot.hash = this.stringPool.intern(details.hash || '')
-        snapshot.uuid = this.stringPool.intern(details.uuid || '')
-        snapshot.status = 'running'
-        snapshot.ts = this.stringPool.intern(timestamp)
-        snapshot.start_message = this.stringPool.intern(message)
-        snapshot.start_details = markRawTaskDetails(details)
+        applySubTaskSnapshotStarting(snapshot, details, message, timestamp)
       } else {
-        snapshot.status = resolveTaskTerminalStatus(phase)
-        snapshot.end_ts = this.stringPool.intern(timestamp)
-        snapshot.end_message = this.stringPool.intern(message)
-        snapshot.end_details = markRawTaskDetails(details)
+        applySubTaskSnapshotTerminal(snapshot, details, message, timestamp, phase)
       }
     }
     const startCurrentPipelineNodeEvent: ScopedPipelineNodeStartingHandler = (
@@ -3370,7 +3394,7 @@ export class LogParser {
       const eventOrder = eventIndex
       const timestamp = event.timestamp
       const { message, details } = event
-      const messageMeta = getCachedMaaMessageMeta(message)
+      const messageMeta = this.getCachedMaaMessageMeta(message)
       const eventTaskId = details.task_id as number | undefined
 
       handleTaskerTaskLifecycleMetaEvent(
