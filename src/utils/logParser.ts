@@ -53,6 +53,12 @@ import {
   resolveSubTaskActionKey,
 } from './logParserActionHelpers'
 import { createRecognitionAttemptHelpers } from './logParserRecognitionHelpers'
+import {
+  attachActionLevelRecognitionAcrossScopes,
+  cloneNestedActionGroup,
+  resolveFallbackRecoDetails,
+  splitRecognitionAttemptsByActionWindow,
+} from './logParserRecognitionScopeHelpers'
 
 export interface ParseProgress {
   current: number
@@ -1359,15 +1365,6 @@ export class LogParser {
       if (isKnownRecognitionRecoId(attempt.reco_id)) return
       actionLevelRecognitionNodes.push(attempt)
     }
-    const resolveFallbackRecoDetails = (
-      details: Record<string, any>,
-      recognitions: RecognitionAttempt[]
-    ): NodeInfo['reco_details'] => {
-      if (details.reco_details) return details.reco_details
-      return recognitions.length > 0
-        ? recognitions[recognitions.length - 1].reco_details
-        : undefined
-    }
     const findActiveParentRecognition = (excludeTaskId?: number): RecognitionAttempt | undefined => {
       for (let i = activeRecognitionStack.length - 1; i >= 0; i--) {
         const frame = activeRecognitionStack[i]
@@ -1376,87 +1373,6 @@ export class LogParser {
         if (attempt) return attempt
       }
       return undefined
-    }
-    const cloneUnifiedFlowItem = (item: UnifiedFlowItem): UnifiedFlowItem => {
-      return {
-        ...item,
-        children: item.children?.map(cloneUnifiedFlowItem),
-      }
-    }
-    const cloneNestedActionGroup = (group: NestedActionGroup): NestedActionGroup => {
-      return {
-        ...group,
-        nested_actions: (group.nested_actions ?? []).map((action) => ({
-          ...action,
-          next_list: action.next_list ? action.next_list.map((next) => ({ ...next })) : undefined,
-          node_flow: action.node_flow ? action.node_flow.map(cloneUnifiedFlowItem) : undefined,
-          recognitions: (action.recognitions ?? []).map(cloneRecognitionAttempt),
-          child_tasks: action.child_tasks?.map(cloneNestedActionGroup),
-        })),
-      }
-    }
-    const traverseNestedActionNodes = (
-      groups: NestedActionGroup[],
-      visitor: (action: NestedActionNode) => boolean
-    ): boolean => {
-      for (const group of groups) {
-        for (const action of group.nested_actions ?? []) {
-          if (visitor(action)) return true
-          if (action.child_tasks && action.child_tasks.length > 0) {
-            if (traverseNestedActionNodes(action.child_tasks, visitor)) return true
-          }
-        }
-      }
-      return false
-    }
-    const attachActionLevelRecognitionAcrossScopes = (
-      topLevelAttempts: RecognitionAttempt[],
-      nestedActionGroups: NestedActionGroup[],
-      actionLevelNodes: RecognitionAttempt[],
-      actionStartOrder?: number
-    ) => {
-      const mergedTopLevelAttempts = topLevelAttempts.map(cloneRecognitionAttempt)
-      const mergedNestedGroups = nestedActionGroups.map(cloneNestedActionGroup)
-      const remaining: RecognitionAttempt[] = []
-      const orderedNodes = sortByParseOrderThenRecoId(actionLevelNodes)
-
-      for (const node of orderedNodes) {
-        // 1) 优先挂到 nested action 的识别尝试（如 CCUpdate 下的 count_xxx）
-        let attached = traverseNestedActionNodes(mergedNestedGroups, (action) => {
-          const attempts: RecognitionAttempt[] = action.recognitions ?? []
-          if (!attempts.length) return false
-          const idx = pickBestAttemptIndex(attempts, node)
-          if (idx < 0) return false
-          attachNodeToAttempt(attempts[idx], node)
-          return true
-        })
-        if (attached) continue
-
-        // 2) 再挂到顶层识别尝试（如 CCBuyCard 的 custom rec）
-        // 仅允许挂载 action 开始前产生的节点，action 期内节点应保持在 action 作用域
-        const nodeMeta = recognitionOrderMeta.get(node)
-        const canAttachToTopLevel = mergedTopLevelAttempts.length > 0 && (
-          actionStartOrder == null ||
-          (nodeMeta != null && nodeMeta.startSeq < actionStartOrder)
-        )
-        if (canAttachToTopLevel) {
-          const idx = pickBestAttemptIndex(mergedTopLevelAttempts, node)
-          if (idx >= 0) {
-            attachNodeToAttempt(mergedTopLevelAttempts[idx], node)
-            attached = true
-          }
-        }
-
-        if (!attached) {
-          remaining.push(node)
-        }
-      }
-
-      return {
-        topLevelAttempts: mergedTopLevelAttempts,
-        nestedActionGroups: mergedNestedGroups,
-        remaining: dedupeRecognitionAttempts(remaining)
-      }
     }
     const pickParentActionNodeForSubTask = (
       parentGroup: NestedActionGroup,
@@ -1579,7 +1495,7 @@ export class LogParser {
     const nestSubTaskActionGroups = (groups: NestedActionGroup[]): NestedActionGroup[] => {
       if (groups.length <= 1) return groups
 
-      const clonedGroups = groups.map(cloneNestedActionGroup)
+      const clonedGroups = groups.map((group) => cloneNestedActionGroup(group, cloneRecognitionAttempt))
       const groupByTaskId = new Map<number, NestedActionGroup>()
       for (const group of clonedGroups) {
         groupByTaskId.set(group.task_id, group)
@@ -1652,29 +1568,6 @@ export class LogParser {
           end_details: snapshot.end_details
         })
       }
-    }
-    const splitRecognitionAttemptsByActionWindow = (
-      attempts: RecognitionAttempt[],
-      actionStartOrder?: number,
-      actionEndOrder?: number
-    ) => {
-      const topLevel: RecognitionAttempt[] = []
-      const actionLevel: RecognitionAttempt[] = []
-      for (const attempt of attempts) {
-        const attemptMeta = recognitionOrderMeta.get(attempt)
-        const inActionWindow = (
-          actionStartOrder != null &&
-          attemptMeta != null &&
-          attemptMeta.endSeq >= actionStartOrder &&
-          (actionEndOrder == null || attemptMeta.startSeq <= actionEndOrder)
-        )
-        if (inActionWindow) {
-          actionLevel.push(attempt)
-        } else {
-          topLevel.push(attempt)
-        }
-      }
-      return { topLevel, actionLevel }
     }
     const resolveFinalNestedActionGroups = (
       taskId: number,
@@ -2278,7 +2171,12 @@ export class LogParser {
       const actionEndOrder = actionId != null ? actionEndOrders.get(actionId) : undefined
       const currentTaskRecognitionAttempts = dedupeRecognitionAttempts(currentTaskRecognitions)
       const { topLevel: scopedTopLevelRecognitions, actionLevel: scopedActionRecognitions } =
-        splitRecognitionAttemptsByActionWindow(currentTaskRecognitionAttempts, actionStartOrder, actionEndOrder)
+        splitRecognitionAttemptsByActionWindow(
+          currentTaskRecognitionAttempts,
+          recognitionOrderMeta,
+          actionStartOrder,
+          actionEndOrder
+        )
       const subTaskActionGroups: NestedActionGroup[] =
         subTasks.consumeAsNestedActionGroups(this.stringPool).map(mergeSubTaskActionGroupWithSnapshot)
       const subTaskOrphanRecognitionAttempts = subTasks.consumeOrphanRecognitions()
@@ -2289,12 +2187,18 @@ export class LogParser {
         ...subTaskOrphanRecognitionAttempts,
         ...subTaskOrphanRecognitionNodes
       ])
-      const scopedAttachResult = attachActionLevelRecognitionAcrossScopes(
-        scopedTopLevelRecognitions,
-        subTaskActionGroups,
-        pendingActionLevelRecognitions,
-        actionStartOrder
-      )
+      const scopedAttachResult = attachActionLevelRecognitionAcrossScopes({
+        topLevelAttempts: scopedTopLevelRecognitions,
+        nestedActionGroups: subTaskActionGroups,
+        actionLevelNodes: pendingActionLevelRecognitions,
+        actionStartOrder,
+        recognitionOrderMeta,
+        cloneRecognitionAttempt,
+        sortByParseOrderThenRecoId,
+        pickBestAttemptIndex,
+        attachNodeToAttempt,
+        dedupeRecognitionAttempts,
+      })
       const nestedRecognitionInAction = scopedAttachResult.remaining
       const resolvedNestedActionGroups = resolveFinalNestedActionGroups(
         taskId,
