@@ -60,6 +60,13 @@ import {
   splitRecognitionAttemptsByActionWindow,
 } from './logParserRecognitionScopeHelpers'
 import { nestSubTaskActionGroups } from './logParserSubTaskNestingHelpers'
+import {
+  applySubTaskSnapshotStarting,
+  applySubTaskSnapshotTerminal,
+  getOrCreateSubTaskSnapshot,
+  mergeSubTaskActionGroupWithSnapshot,
+  type SubTaskSnapshot,
+} from './logParserSubTaskSnapshotHelpers'
 
 export interface ParseProgress {
   current: number
@@ -564,20 +571,6 @@ export class LogParser {
 
     const taskEvents = this.events.slice(taskStartIndex, taskEndIndex + 1)
 
-    type SubTaskStatus = 'running' | 'succeeded' | 'failed'
-    type SubTaskSnapshot = {
-      task_id: number
-      entry?: string
-      hash?: string
-      uuid?: string
-      status: SubTaskStatus
-      ts?: string
-      end_ts?: string
-      start_message?: string
-      end_message?: string
-      start_details?: Record<string, any>
-      end_details?: Record<string, any>
-    }
     type WaitFreezesRuntimeState = {
       wf_id: number
       name: string
@@ -986,47 +979,6 @@ export class LogParser {
         order: existing?.order ?? eventOrder,
       })
     }
-    const markRawTaskDetails = (details: Record<string, any> | undefined): Record<string, any> | undefined => {
-      if (!details) return undefined
-      return markRaw({ ...details })
-    }
-    const getOrCreateSubTaskSnapshot = (taskId: number): SubTaskSnapshot => {
-      const existing = subTaskSnapshots.get(taskId)
-      if (existing) return existing
-      const created: SubTaskSnapshot = {
-        task_id: taskId,
-        status: 'running'
-      }
-      subTaskSnapshots.set(taskId, created)
-      return created
-    }
-    const applySubTaskSnapshotStarting = (
-      snapshot: SubTaskSnapshot,
-      details: Record<string, any>,
-      message: string,
-      timestamp: string
-    ) => {
-      const lifecycleDetails = resolveTaskLifecycleEventDetails(details)
-      snapshot.entry = this.stringPool.intern(lifecycleDetails.entry)
-      snapshot.hash = this.stringPool.intern(lifecycleDetails.hash)
-      snapshot.uuid = this.stringPool.intern(lifecycleDetails.uuid)
-      snapshot.status = 'running'
-      snapshot.ts = this.stringPool.intern(timestamp)
-      snapshot.start_message = this.stringPool.intern(message)
-      snapshot.start_details = markRawTaskDetails(details)
-    }
-    const applySubTaskSnapshotTerminal = (
-      snapshot: SubTaskSnapshot,
-      details: Record<string, any>,
-      message: string,
-      timestamp: string,
-      phase: TaskTerminalPhase
-    ) => {
-      snapshot.status = resolveTaskTerminalStatus(phase)
-      snapshot.end_ts = this.stringPool.intern(timestamp)
-      snapshot.end_message = this.stringPool.intern(message)
-      snapshot.end_details = markRawTaskDetails(details)
-    }
     const removeFromActiveRecognitionStack = (taskId: number, recoId: number) => {
       for (let i = activeRecognitionStack.length - 1; i >= 0; i--) {
         const frame = activeRecognitionStack[i]
@@ -1374,46 +1326,6 @@ export class LogParser {
         if (attempt) return attempt
       }
       return undefined
-    }
-    const mergeSubTaskActionGroupWithSnapshot = (group: NestedActionGroup): NestedActionGroup => {
-      const snapshot = subTaskSnapshots.get(group.task_id)
-      if (!snapshot) return group
-
-      const snapshotStatus: 'success' | 'failed' | 'running' =
-        snapshot.status === 'failed'
-          ? 'failed'
-          : snapshot.status === 'running'
-            ? 'running'
-            : 'success'
-      const mergedStatus: 'success' | 'failed' | 'running' =
-        group.status === 'failed' || snapshotStatus === 'failed'
-          ? 'failed'
-          : group.status === 'running' || snapshotStatus === 'running'
-            ? 'running'
-            : 'success'
-      const snapshotStartTimestamp = snapshot.ts || group.ts
-      const snapshotEndTimestamp = snapshot.end_ts
-
-      return {
-        ...group,
-        name: this.stringPool.intern(snapshot.entry || group.name),
-        ts: this.stringPool.intern(snapshotStartTimestamp || group.ts),
-        end_ts: snapshotEndTimestamp ? this.stringPool.intern(snapshotEndTimestamp) : undefined,
-        status: mergedStatus,
-        task_details: markRaw({
-          task_id: snapshot.task_id,
-          entry: snapshot.entry || '',
-          hash: snapshot.hash || '',
-          uuid: snapshot.uuid || '',
-          status: snapshot.status,
-          ts: snapshot.ts,
-          end_ts: snapshot.end_ts,
-          start_message: snapshot.start_message,
-          end_message: snapshot.end_message,
-          start_details: snapshot.start_details,
-          end_details: snapshot.end_details
-        })
-      }
     }
     const resolveFinalNestedActionGroups = (
       taskId: number,
@@ -2030,7 +1942,16 @@ export class LogParser {
           actionEndOrder
         )
       const subTaskActionGroups: NestedActionGroup[] =
-        subTasks.consumeAsNestedActionGroups(this.stringPool).map(mergeSubTaskActionGroupWithSnapshot)
+        subTasks.consumeAsNestedActionGroups(this.stringPool).map((group) => {
+          const snapshot = subTaskSnapshots.get(group.task_id)
+          return snapshot
+            ? mergeSubTaskActionGroupWithSnapshot(
+              group,
+              snapshot,
+              (value) => this.stringPool.intern(value)
+            )
+            : group
+        })
       const subTaskOrphanRecognitionAttempts = subTasks.consumeOrphanRecognitions()
       const subTaskOrphanRecognitionNodes = subTasks.consumeOrphanRecognitionNodes()
       const pendingActionLevelRecognitions = dedupeRecognitionAttempts([
@@ -2615,12 +2536,25 @@ export class LogParser {
         subTaskParentByTaskId.set(subTaskId, parentTaskId)
       },
       onSubTaskStarting: (subTaskId, subTaskDetails, subTaskMessage, subTaskTimestamp) => {
-        const snapshot = getOrCreateSubTaskSnapshot(subTaskId)
-        applySubTaskSnapshotStarting(snapshot, subTaskDetails, subTaskMessage, subTaskTimestamp)
+        const snapshot = getOrCreateSubTaskSnapshot(subTaskSnapshots, subTaskId)
+        applySubTaskSnapshotStarting(
+          snapshot,
+          subTaskDetails,
+          subTaskMessage,
+          subTaskTimestamp,
+          (value) => this.stringPool.intern(value)
+        )
       },
       onSubTaskTerminal: (subTaskId, subTaskDetails, subTaskMessage, subTaskTimestamp, phase) => {
-        const snapshot = getOrCreateSubTaskSnapshot(subTaskId)
-        applySubTaskSnapshotTerminal(snapshot, subTaskDetails, subTaskMessage, subTaskTimestamp, phase)
+        const snapshot = getOrCreateSubTaskSnapshot(subTaskSnapshots, subTaskId)
+        applySubTaskSnapshotTerminal(
+          snapshot,
+          subTaskDetails,
+          subTaskMessage,
+          subTaskTimestamp,
+          phase,
+          (value) => this.stringPool.intern(value)
+        )
       },
     }
     for (let eventIndex = 0; eventIndex < taskEvents.length; eventIndex++) {
