@@ -61,6 +61,27 @@ interface MaaMessageMeta {
   nodeKind: MaaNodeKind
 }
 
+type TaskLifecycleEventDetails = {
+  task_id?: number
+  entry: string
+  hash: string
+  uuid: string
+}
+
+const resolveEventTaskId = (details: Record<string, any> | undefined): number | undefined => {
+  return details && typeof details.task_id === 'number' ? details.task_id : undefined
+}
+
+const resolveTaskLifecycleEventDetails = (details: Record<string, any> | undefined): TaskLifecycleEventDetails => {
+  const safeDetails = details ?? {}
+  return {
+    task_id: resolveEventTaskId(safeDetails),
+    entry: typeof safeDetails.entry === 'string' ? safeDetails.entry : '',
+    hash: typeof safeDetails.hash === 'string' ? safeDetails.hash : '',
+    uuid: typeof safeDetails.uuid === 'string' ? safeDetails.uuid : '',
+  }
+}
+
 const normalizeMaaDomain = (value: string): MaaDomain => {
   switch (value) {
     case 'Resource':
@@ -420,10 +441,11 @@ export class LogParser {
 
     const eventMeta = this.getCachedMaaMessageMeta(event.message)
     const taskLifecyclePhase = resolveTaskLifecyclePhase(eventMeta)
-    if (taskLifecyclePhase === 'Starting' && event.details.task_id) {
-      if (!this.taskProcessMap.has(event.details.task_id)) {
-        this.taskProcessMap.set(event.details.task_id, event.processId)
-        this.taskThreadMap.set(event.details.task_id, event.threadId)
+    const lifecycleDetails = resolveTaskLifecycleEventDetails(event.details)
+    if (taskLifecyclePhase === 'Starting' && lifecycleDetails.task_id != null) {
+      if (!this.taskProcessMap.has(lifecycleDetails.task_id)) {
+        this.taskProcessMap.set(lifecycleDetails.task_id, event.processId)
+        this.taskThreadMap.set(lifecycleDetails.task_id, event.threadId)
       }
     }
   }
@@ -698,10 +720,11 @@ export class LogParser {
       const { message, details } = event
       const meta = this.getCachedMaaMessageMeta(message)
       const taskLifecyclePhase = resolveTaskLifecyclePhase(meta)
+      const lifecycleDetails = resolveTaskLifecycleEventDetails(details)
 
       if (taskLifecyclePhase === 'Starting') {
-        const taskId = details.task_id
-        const uuid = details.uuid || ''
+        const taskId = lifecycleDetails.task_id
+        const uuid = lifecycleDetails.uuid
 
         const isDuplicate = tasks.some(t =>
           t.uuid === uuid && t.task_id === taskId && !t.end_time
@@ -710,8 +733,8 @@ export class LogParser {
         if (taskId && !isDuplicate) {
           tasks.push({
             task_id: taskId,
-            entry: this.stringPool.intern(details.entry || ''),
-            hash: this.stringPool.intern(details.hash || ''),
+            entry: this.stringPool.intern(lifecycleDetails.entry),
+            hash: this.stringPool.intern(lifecycleDetails.hash),
             uuid: this.stringPool.intern(uuid),
             start_time: this.stringPool.intern(event.timestamp),
             status: 'running',
@@ -722,8 +745,8 @@ export class LogParser {
           })
         }
       } else if (taskLifecyclePhase && isTaskTerminalPhase(taskLifecyclePhase)) {
-        const taskId = details.task_id
-        const uuid = details.uuid
+        const taskId = lifecycleDetails.task_id
+        const uuid = lifecycleDetails.uuid
 
         let matchedTask = null
         if (uuid && uuid.trim() !== '') {
@@ -754,7 +777,7 @@ export class LogParser {
       if (taskStartIndex >= 0) {
         task.events = this.events
           .slice(taskStartIndex, taskEndIndex + 1)
-          .filter(event => event.details?.task_id === task.task_id)
+          .filter(event => resolveEventTaskId(event.details) === task.task_id)
           .map((event) => ({
             timestamp: event.timestamp,
             level: event.level,
@@ -1270,9 +1293,10 @@ export class LogParser {
       message: string,
       timestamp: string
     ) => {
-      snapshot.entry = this.stringPool.intern(details.entry || '')
-      snapshot.hash = this.stringPool.intern(details.hash || '')
-      snapshot.uuid = this.stringPool.intern(details.uuid || '')
+      const lifecycleDetails = resolveTaskLifecycleEventDetails(details)
+      snapshot.entry = this.stringPool.intern(lifecycleDetails.entry)
+      snapshot.hash = this.stringPool.intern(lifecycleDetails.hash)
+      snapshot.uuid = this.stringPool.intern(lifecycleDetails.uuid)
       snapshot.status = 'running'
       snapshot.ts = this.stringPool.intern(timestamp)
       snapshot.start_message = this.stringPool.intern(message)
@@ -3395,7 +3419,7 @@ export class LogParser {
       const timestamp = event.timestamp
       const { message, details } = event
       const messageMeta = this.getCachedMaaMessageMeta(message)
-      const eventTaskId = details.task_id as number | undefined
+      const eventTaskId = resolveEventTaskId(details)
 
       handleTaskerTaskLifecycleMetaEvent(
         messageMeta,

@@ -101,6 +101,7 @@ export async function buildFlowchartData(task: TaskInfo, options: BuildFlowchart
 
   // 4. Build edges
   const flowEdges: Edge[] = []
+  const flowEdgeById = new Map<string, Edge>()
   const edgeSet = new Set<string>()
 
   // Topology edges from next_list
@@ -111,7 +112,7 @@ export async function buildFlowchartData(task: TaskInfo, options: BuildFlowchart
       if (edgeSet.has(edgeId)) return
       edgeSet.add(edgeId)
 
-      flowEdges.push({
+      const flowEdge: Edge = {
         id: edgeId,
         source: node.name,
         target: next.name,
@@ -121,7 +122,9 @@ export async function buildFlowchartData(task: TaskInfo, options: BuildFlowchart
           jump_back: next.jump_back,
           edgeStatus: 'topology',
         } satisfies FlowEdgeData,
-      })
+      }
+      flowEdges.push(flowEdge)
+      flowEdgeById.set(edgeId, flowEdge)
     })
   })
 
@@ -131,7 +134,7 @@ export async function buildFlowchartData(task: TaskInfo, options: BuildFlowchart
     const to = orderedNodes[i + 1].name
     const edgeId = `${from}->${to}`
 
-    const existing = flowEdges.find(e => e.id === edgeId)
+    const existing = flowEdgeById.get(edgeId)
     const toNodeStatus: FlowEdgeData['edgeStatus'] = orderedNodes[i + 1].status === 'failed'
       ? 'failed'
       : orderedNodes[i + 1].status === 'running'
@@ -147,7 +150,7 @@ export async function buildFlowchartData(task: TaskInfo, options: BuildFlowchart
       }
     } else {
       // Create new execution edge (not in topology)
-      flowEdges.push({
+      const flowEdge: Edge = {
         id: edgeId,
         source: from,
         target: to,
@@ -157,7 +160,9 @@ export async function buildFlowchartData(task: TaskInfo, options: BuildFlowchart
           jump_back: false,
           edgeStatus: toNodeStatus,
         } satisfies FlowEdgeData,
-      })
+      }
+      flowEdges.push(flowEdge)
+      flowEdgeById.set(edgeId, flowEdge)
     }
   }
 

@@ -102,6 +102,23 @@ const { visibleRecognitionList } = useMergedRecognitionList({
   showNotRecognizedNodes: computed(() => settings.showNotRecognizedNodes),
 })
 
+const sharedNodeCardBaseProps = computed(() => ({
+  node: props.node,
+  mergedRecognitionList: visibleRecognitionList.value,
+  isVscodeLaunchEmbed: props.isVscodeLaunchEmbed,
+  bridgeRequestTaskDoc: props.bridgeRequestTaskDoc,
+}))
+
+const sharedExpandableViewProps = computed(() => ({
+  ...sharedNodeCardBaseProps.value,
+  recognitionExpanded: effectiveRecognitionExpanded.value,
+  actionExpanded: effectiveActionExpanded.value,
+  defaultCollapseNestedRecognition: settings.defaultCollapseNestedRecognition,
+  defaultCollapseNestedActionNodes: settings.defaultCollapseNestedActionNodes,
+  isExpanded,
+  forceExpandRelatedWhileRunning: forceExpandRelatedWhileRunning.value,
+}))
+
 const handleSelectAction = (node: NodeInfo) => {
   emit('select-action', node)
 }
@@ -172,16 +189,7 @@ const toggleActionSection = () => {
       <n-flex vertical style="gap: 12px">
         <node-card-detailed
           v-if="settings.displayMode === 'detailed'"
-          :node="node"
-          :merged-recognition-list="visibleRecognitionList"
-          :is-vscode-launch-embed="isVscodeLaunchEmbed"
-          :bridge-request-task-doc="bridgeRequestTaskDoc"
-          :recognition-expanded="effectiveRecognitionExpanded"
-          :action-expanded="effectiveActionExpanded"
-          :default-collapse-nested-recognition="settings.defaultCollapseNestedRecognition"
-          :default-collapse-nested-action-nodes="settings.defaultCollapseNestedActionNodes"
-          :is-expanded="isExpanded"
-          :force-expand-related-while-running="forceExpandRelatedWhileRunning"
+          v-bind="sharedExpandableViewProps"
           @select-action="handleSelectAction"
           @select-recognition="handleSelectRecognition"
           @select-flow-item="handleSelectFlowItem"
@@ -191,26 +199,14 @@ const toggleActionSection = () => {
         />
         <node-card-compact
           v-else-if="settings.displayMode === 'compact'"
-          :node="node"
-          :merged-recognition-list="visibleRecognitionList"
-          :is-vscode-launch-embed="isVscodeLaunchEmbed"
-          :bridge-request-task-doc="bridgeRequestTaskDoc"
+          v-bind="sharedNodeCardBaseProps"
           @select-action="handleSelectAction"
           @select-recognition="handleSelectRecognition"
           @select-flow-item="handleSelectFlowItem"
         />
         <node-card-tree
           v-else
-          :node="node"
-          :merged-recognition-list="visibleRecognitionList"
-          :is-vscode-launch-embed="isVscodeLaunchEmbed"
-          :bridge-request-task-doc="bridgeRequestTaskDoc"
-          :recognition-expanded="effectiveRecognitionExpanded"
-          :action-expanded="effectiveActionExpanded"
-          :default-collapse-nested-recognition="settings.defaultCollapseNestedRecognition"
-          :default-collapse-nested-action-nodes="settings.defaultCollapseNestedActionNodes"
-          :is-expanded="isExpanded"
-          :force-expand-related-while-running="forceExpandRelatedWhileRunning"
+          v-bind="sharedExpandableViewProps"
           @select-action="handleSelectAction"
           @select-recognition="handleSelectRecognition"
           @select-flow-item="handleSelectFlowItem"
