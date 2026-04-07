@@ -13,6 +13,8 @@ import type {
 import { StringPool } from './stringPool'
 import { buildActionFlowItems, buildRecognitionFlowItems } from './nodeFlow'
 import {
+  decodeCompactActionDetails,
+  decodeCompactNodeDetails,
   decodeEventIdentityIds,
   decodeTaskLifecycleEventDetails,
   parseNumericArray,
@@ -722,23 +724,23 @@ export class LogParser {
     }
 
     if (details.action_details && typeof details.action_details === 'object') {
-      const raw = details.action_details as Record<string, unknown>
-      const actionDetails: Record<string, unknown> = {}
-      if (typeof raw.action_id === 'number') actionDetails.action_id = raw.action_id
-      if (typeof raw.action === 'string') actionDetails.action = this.stringPool.intern(raw.action)
-      if (typeof raw.name === 'string') actionDetails.name = this.stringPool.intern(raw.name)
-      if (typeof raw.success === 'boolean') actionDetails.success = raw.success
-      if (Object.keys(actionDetails).length > 0) {
+      const parsed = decodeCompactActionDetails(details.action_details)
+      if (parsed) {
+        const actionDetails: Record<string, unknown> = {}
+        if (parsed.action_id != null) actionDetails.action_id = parsed.action_id
+        if (parsed.action != null) actionDetails.action = this.stringPool.intern(parsed.action)
+        if (parsed.name != null) actionDetails.name = this.stringPool.intern(parsed.name)
+        if (parsed.success != null) actionDetails.success = parsed.success
         compact.action_details = markRaw(actionDetails)
       }
     }
 
     if (details.node_details && typeof details.node_details === 'object') {
-      const raw = details.node_details as Record<string, unknown>
-      const nodeDetails: Record<string, unknown> = {}
-      if (typeof raw.action_id === 'number') nodeDetails.action_id = raw.action_id
-      if (typeof raw.node_id === 'number') nodeDetails.node_id = raw.node_id
-      if (Object.keys(nodeDetails).length > 0) {
+      const parsed = decodeCompactNodeDetails(details.node_details)
+      if (parsed) {
+        const nodeDetails: Record<string, unknown> = {}
+        if (parsed.action_id != null) nodeDetails.action_id = parsed.action_id
+        if (parsed.node_id != null) nodeDetails.node_id = parsed.node_id
         compact.node_details = markRaw(nodeDetails)
       }
     }

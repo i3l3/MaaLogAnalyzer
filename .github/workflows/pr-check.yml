@@ -54,9 +54,9 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           mapfile -t core_tests < <(
-            find src/utils/__tests__ src/views/flowchart/composables/__tests__ \
+            find src \
               -type f \
-              -name '*.test.ts' \
+              -path '*/__tests__/*.test.ts' \
               | sort
           )
           if [ "${#core_tests[@]}" -eq 0 ]; then

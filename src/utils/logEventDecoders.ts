@@ -17,6 +17,18 @@ export interface EventIdentityIds {
   wf_id?: number
 }
 
+export interface CompactActionDetails {
+  action_id?: number
+  action?: string
+  name?: string
+  success?: boolean
+}
+
+export interface CompactNodeDetails {
+  action_id?: number
+  node_id?: number
+}
+
 export const readNumberField = (
   details: EventDetails | undefined,
   field: string
@@ -84,4 +96,34 @@ export const parseWaitFreezesParam = (
   if (typeof raw.time === 'number') param.time = raw.time
   if (typeof raw.timeout === 'number') param.timeout = raw.timeout
   return Object.keys(param).length > 0 ? param : undefined
+}
+
+export const decodeCompactActionDetails = (
+  value: unknown,
+): CompactActionDetails | undefined => {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as Record<string, unknown>
+  const compact: CompactActionDetails = {}
+  const actionId = readNumberField(raw, 'action_id')
+  if (actionId != null) compact.action_id = actionId
+  const action = readStringField(raw, 'action')
+  if (action != null) compact.action = action
+  const name = readStringField(raw, 'name')
+  if (name != null) compact.name = name
+  const success = raw.success
+  if (typeof success === 'boolean') compact.success = success
+  return Object.keys(compact).length > 0 ? compact : undefined
+}
+
+export const decodeCompactNodeDetails = (
+  value: unknown,
+): CompactNodeDetails | undefined => {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as Record<string, unknown>
+  const compact: CompactNodeDetails = {}
+  const actionId = readNumberField(raw, 'action_id')
+  if (actionId != null) compact.action_id = actionId
+  const nodeId = readNumberField(raw, 'node_id')
+  if (nodeId != null) compact.node_id = nodeId
+  return Object.keys(compact).length > 0 ? compact : undefined
 }

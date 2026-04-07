@@ -7,6 +7,7 @@ import ProcessTimelineListPane from './ProcessTimelineListPane.vue'
 import type { NodeInfo, TaskInfo } from '../../../types'
 import type { NodeNavViewItem } from '../composables/useNodeNavSearch'
 import type { VNodeChild } from 'vue'
+import { resolveNodeByOriginalIndex } from '../composables/nodeNavSelection'
 
 type ReloadOption = {
   label: string
@@ -70,9 +71,9 @@ const emit = defineEmits<{
 
 const handleSelectNodeNav = (index: number) => {
   emit('select-node-nav', index)
-  const item = props.nodeNavItems.find((entry) => entry.originalIndex === index)
-  if (item) {
-    emit('select-node', item.node)
+  const node = resolveNodeByOriginalIndex(props.nodeNavItems, index)
+  if (node) {
+    emit('select-node', node)
   }
 }
 </script>

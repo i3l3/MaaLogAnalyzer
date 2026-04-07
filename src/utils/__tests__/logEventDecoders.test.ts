@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  decodeCompactActionDetails,
+  decodeCompactNodeDetails,
   decodeEventIdentityIds,
   decodeTaskLifecycleEventDetails,
   parseNumericArray,
@@ -118,5 +120,41 @@ describe('logEventDecoders', () => {
 
     expect(parseWaitFreezesParam({ method: '1' })).toBeUndefined()
     expect(parseWaitFreezesParam(null)).toBeUndefined()
+  })
+
+  it('decodes compact action details safely', () => {
+    expect(
+      decodeCompactActionDetails({
+        action_id: 3,
+        action: 'Tap',
+        name: 'DoTap',
+        success: true,
+        ignored: 1,
+      })
+    ).toEqual({
+      action_id: 3,
+      action: 'Tap',
+      name: 'DoTap',
+      success: true,
+    })
+
+    expect(decodeCompactActionDetails({ action_id: 'bad' })).toBeUndefined()
+    expect(decodeCompactActionDetails(null)).toBeUndefined()
+  })
+
+  it('decodes compact node details safely', () => {
+    expect(
+      decodeCompactNodeDetails({
+        action_id: 7,
+        node_id: 11,
+        extra: 'x',
+      })
+    ).toEqual({
+      action_id: 7,
+      node_id: 11,
+    })
+
+    expect(decodeCompactNodeDetails({ action_id: 'x', node_id: null })).toBeUndefined()
+    expect(decodeCompactNodeDetails(undefined)).toBeUndefined()
   })
 })
