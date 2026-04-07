@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  decodeEventIdentityIds,
   decodeTaskLifecycleEventDetails,
+  parseNumericArray,
+  parseRoi,
+  parseWaitFreezesParam,
   readNumberField,
   readStringField,
 } from '../logEventDecoders'
@@ -52,5 +56,67 @@ describe('logEventDecoders', () => {
       hash: '',
       uuid: '',
     })
+  })
+
+  it('decodes common identity ids', () => {
+    expect(
+      decodeEventIdentityIds({
+        task_id: 1,
+        node_id: 2,
+        reco_id: 3,
+        action_id: 4,
+        wf_id: 5,
+      })
+    ).toEqual({
+      task_id: 1,
+      node_id: 2,
+      reco_id: 3,
+      action_id: 4,
+      wf_id: 5,
+    })
+
+    expect(
+      decodeEventIdentityIds({
+        task_id: '1',
+        node_id: null,
+      })
+    ).toEqual({
+      task_id: undefined,
+      node_id: undefined,
+      reco_id: undefined,
+      action_id: undefined,
+      wf_id: undefined,
+    })
+  })
+
+  it('parses numeric array and ROI safely', () => {
+    expect(parseNumericArray([1, '2', 'x', 3.5])).toEqual([1, 2, 3.5])
+    expect(parseNumericArray(['x', undefined])).toBeUndefined()
+
+    expect(parseRoi([1, 2, '3', 4])).toEqual([1, 2, 3, 4])
+    expect(parseRoi([1, 2, 3])).toBeUndefined()
+    expect(parseRoi(['x', 2, 3, 4])).toBeUndefined()
+  })
+
+  it('parses wait-freezes param with known numeric keys only', () => {
+    expect(
+      parseWaitFreezesParam({
+        method: 1,
+        rate_limit: 0.5,
+        threshold: 0.8,
+        time: 10,
+        timeout: 1000,
+        unexpected: 999,
+      })
+    ).toEqual({
+      method: 1,
+      rate_limit: 0.5,
+      threshold: 0.8,
+      time: 10,
+      timeout: 1000,
+    })
+
+    expect(parseWaitFreezesParam({ method: '1' })).toBeUndefined()
+    expect(parseWaitFreezesParam(null)).toBeUndefined()
   })
 })

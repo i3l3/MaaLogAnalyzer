@@ -13,8 +13,13 @@ import type {
 import { StringPool } from './stringPool'
 import { buildActionFlowItems, buildRecognitionFlowItems } from './nodeFlow'
 import {
+  decodeEventIdentityIds,
   decodeTaskLifecycleEventDetails,
+  parseNumericArray,
+  parseRoi,
+  parseWaitFreezesParam,
   readNumberField,
+  readStringField,
   type TaskLifecycleEventDetails,
 } from './logEventDecoders'
 
@@ -659,25 +664,37 @@ export class LogParser {
   private compactTaskEventDetails(message: string, details: Record<string, any>): Record<string, any> {
     const compact: Record<string, any> = {}
 
-    if (typeof details.task_id === 'number') compact.task_id = details.task_id
-    if (typeof details.node_id === 'number') compact.node_id = details.node_id
-    if (typeof details.reco_id === 'number') compact.reco_id = details.reco_id
-    if (typeof details.action_id === 'number') compact.action_id = details.action_id
+    const ids = decodeEventIdentityIds(details)
+    if (ids.task_id != null) compact.task_id = ids.task_id
+    if (ids.node_id != null) compact.node_id = ids.node_id
+    if (ids.reco_id != null) compact.reco_id = ids.reco_id
+    if (ids.action_id != null) compact.action_id = ids.action_id
 
-    if (typeof details.name === 'string') compact.name = this.stringPool.intern(details.name)
-    if (typeof details.entry === 'string') compact.entry = this.stringPool.intern(details.entry)
-    if (typeof details.status === 'string') compact.status = this.stringPool.intern(details.status)
-    if (typeof details.error === 'string') compact.error = this.stringPool.intern(details.error)
-    if (typeof details.reason === 'string') compact.reason = this.stringPool.intern(details.reason)
-    if (typeof details.uuid === 'string') compact.uuid = this.stringPool.intern(details.uuid)
-    if (typeof details.hash === 'string') compact.hash = this.stringPool.intern(details.hash)
-    if (typeof details.action === 'string') compact.action = this.stringPool.intern(details.action)
-    if (typeof details.anchor === 'string') compact.anchor = this.stringPool.intern(details.anchor)
+    const name = readStringField(details, 'name')
+    if (name != null) compact.name = this.stringPool.intern(name)
+    const entry = readStringField(details, 'entry')
+    if (entry != null) compact.entry = this.stringPool.intern(entry)
+    const status = readStringField(details, 'status')
+    if (status != null) compact.status = this.stringPool.intern(status)
+    const error = readStringField(details, 'error')
+    if (error != null) compact.error = this.stringPool.intern(error)
+    const reason = readStringField(details, 'reason')
+    if (reason != null) compact.reason = this.stringPool.intern(reason)
+    const uuid = readStringField(details, 'uuid')
+    if (uuid != null) compact.uuid = this.stringPool.intern(uuid)
+    const hash = readStringField(details, 'hash')
+    if (hash != null) compact.hash = this.stringPool.intern(hash)
+    const action = readStringField(details, 'action')
+    if (action != null) compact.action = this.stringPool.intern(action)
+    const anchor = readStringField(details, 'anchor')
+    if (anchor != null) compact.anchor = this.stringPool.intern(anchor)
 
     if (message.startsWith('Node.WaitFreezes.')) {
-      if (typeof details.wf_id === 'number') compact.wf_id = details.wf_id
-      if (typeof details.phase === 'string') compact.phase = this.stringPool.intern(details.phase)
-      if (typeof details.elapsed === 'number') compact.elapsed = details.elapsed
+      if (ids.wf_id != null) compact.wf_id = ids.wf_id
+      const phase = readStringField(details, 'phase')
+      if (phase != null) compact.phase = this.stringPool.intern(phase)
+      const elapsed = readNumberField(details, 'elapsed')
+      if (elapsed != null) compact.elapsed = elapsed
       if (Object.prototype.hasOwnProperty.call(details, 'focus')) {
         const rawFocus = details.focus
         compact.focus = (rawFocus != null && typeof rawFocus === 'object')
@@ -685,36 +702,14 @@ export class LogParser {
           : rawFocus
       }
 
-      if (Array.isArray(details.reco_ids)) {
-        const recoIds = details.reco_ids
-          .map((item: unknown) => typeof item === 'number' ? item : Number(item))
-          .filter((item: number) => Number.isFinite(item))
-        if (recoIds.length > 0) {
-          compact.reco_ids = markRaw(recoIds)
-        }
-      }
+      const recoIds = parseNumericArray(details.reco_ids)
+      if (recoIds) compact.reco_ids = markRaw(recoIds)
 
-      if (Array.isArray(details.roi) && details.roi.length === 4) {
-        const roi = details.roi
-          .map((item: unknown) => typeof item === 'number' ? item : Number(item))
-          .filter((item: number) => Number.isFinite(item))
-        if (roi.length === 4) {
-          compact.roi = markRaw(roi)
-        }
-      }
+      const roi = parseRoi(details.roi)
+      if (roi) compact.roi = markRaw(roi)
 
-      if (details.param && typeof details.param === 'object') {
-        const rawParam = details.param as Record<string, unknown>
-        const param: Record<string, unknown> = {}
-        if (typeof rawParam.method === 'number') param.method = rawParam.method
-        if (typeof rawParam.rate_limit === 'number') param.rate_limit = rawParam.rate_limit
-        if (typeof rawParam.threshold === 'number') param.threshold = rawParam.threshold
-        if (typeof rawParam.time === 'number') param.time = rawParam.time
-        if (typeof rawParam.timeout === 'number') param.timeout = rawParam.timeout
-        if (Object.keys(param).length > 0) {
-          compact.param = markRaw(param)
-        }
-      }
+      const param = parseWaitFreezesParam(details.param)
+      if (param) compact.param = markRaw(param)
     }
 
     if (Array.isArray(details.list)) {
@@ -1084,29 +1079,6 @@ export class LogParser {
       const wfId = typeof value === 'number' ? value : Number(value)
       return Number.isFinite(wfId) ? wfId : null
     }
-    const normalizeNumericArray = (value: unknown): number[] | undefined => {
-      if (!Array.isArray(value)) return undefined
-      const normalized = value
-        .map((item: unknown) => typeof item === 'number' ? item : Number(item))
-        .filter((item: number) => Number.isFinite(item))
-      return normalized.length > 0 ? normalized : undefined
-    }
-    const parseWaitFreezesRoi = (value: unknown): [number, number, number, number] | undefined => {
-      const normalized = normalizeNumericArray(value)
-      if (!normalized || normalized.length !== 4) return undefined
-      return [normalized[0], normalized[1], normalized[2], normalized[3]]
-    }
-    const parseWaitFreezesParam = (value: unknown): WaitFreezesDetail['param'] | undefined => {
-      if (!value || typeof value !== 'object') return undefined
-      const raw = value as Record<string, unknown>
-      const param: WaitFreezesDetail['param'] = {}
-      if (typeof raw.method === 'number') param.method = raw.method
-      if (typeof raw.rate_limit === 'number') param.rate_limit = raw.rate_limit
-      if (typeof raw.threshold === 'number') param.threshold = raw.threshold
-      if (typeof raw.time === 'number') param.time = raw.time
-      if (typeof raw.timeout === 'number') param.timeout = raw.timeout
-      return Object.keys(param).length > 0 ? param : undefined
-    }
     const toWaitFreezesFlowItem = (state: WaitFreezesRuntimeState): UnifiedFlowItem => {
       return {
         id: `node.wait_freezes.${state.wf_id}`,
@@ -1293,8 +1265,8 @@ export class LogParser {
       const rawPhase = typeof details.phase === 'string' ? details.phase.trim() : ''
       const phase = rawPhase ? this.stringPool.intern(rawPhase) : existing?.phase
       const elapsed = typeof details.elapsed === 'number' ? details.elapsed : existing?.elapsed
-      const recoIds = normalizeNumericArray(details.reco_ids) ?? existing?.reco_ids
-      const roi = parseWaitFreezesRoi(details.roi) ?? existing?.roi
+      const recoIds = parseNumericArray(details.reco_ids) ?? existing?.reco_ids
+      const roi = parseRoi(details.roi) ?? existing?.roi
       const param = parseWaitFreezesParam(details.param) ?? existing?.param
       const focus = resolveEventFocus(details, existing?.focus)
       const images = this.findWaitFreezesImages(timestamp, name) ?? existing?.images
@@ -3036,7 +3008,7 @@ export class LogParser {
       timestamp: string,
       eventOrder: number
     ): void => {
-      const actionId = details.action_id as number | undefined
+      const actionId = readNumberField(details, 'action_id')
       if (actionId == null) {
         refreshActivePipelineNodePreview(timestamp)
         return
@@ -3086,7 +3058,7 @@ export class LogParser {
         refreshActivePipelineNodePreview(timestamp)
         return
       }
-      const actionId = details.action_id as number | undefined
+      const actionId = readNumberField(details, 'action_id')
       if (phase === 'Starting') {
         if (actionId != null) {
           const actionKey = resolveSubTaskActionKey(subTaskId, actionId)!
@@ -3311,8 +3283,8 @@ export class LogParser {
       details: Record<string, any>,
       timestamp: string
     ) => {
-      if (!details.node_id) return
-      const nodeId = details.node_id as number
+      const nodeId = readNumberField(details, 'node_id')
+      if (nodeId == null) return
       const startTimestamp = this.stringPool.intern(timestamp)
       pipelineNodeStartTimes.set(nodeId, startTimestamp)
       activePipelineNodeId = nodeId
@@ -3351,8 +3323,9 @@ export class LogParser {
     ) => {
       if (subTaskId != null) {
         resetTaskNodeAggregation(subTaskId)
-        if (details.node_id != null) {
-          subTaskPipelineNodeStartTimes.set(scopedKey(subTaskId, details.node_id), this.stringPool.intern(timestamp))
+        const nodeId = readNumberField(details, 'node_id')
+        if (nodeId != null) {
+          subTaskPipelineNodeStartTimes.set(scopedKey(subTaskId, nodeId), this.stringPool.intern(timestamp))
         }
       }
       refreshActivePipelineNodePreview(timestamp)
