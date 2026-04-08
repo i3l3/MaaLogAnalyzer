@@ -71,6 +71,11 @@ import {
   upsertWaitFreezesState,
   type WaitFreezesRuntimeState,
 } from './logParserWaitFreezesHelpers'
+import {
+  partitionActionScopeWaitFreezes,
+  sortFlowItemsByTimestamp,
+  splitAndAttachWaitFreezesFlowItems,
+} from './logParserFlowAssemblyHelpers'
 
 export interface ParseProgress {
   current: number
@@ -756,136 +761,6 @@ export class LogParser {
       if (details.focus == null) return fallback
       return markRaw(details.focus)
     }
-    const sortFlowItemsByTimestamp = (items: UnifiedFlowItem[]): UnifiedFlowItem[] => {
-      return items
-        .map((item, index) => ({ item, index }))
-        .sort((a, b) => {
-          const delta = toTimestampMs(a.item.ts || a.item.end_ts) - toTimestampMs(b.item.ts || b.item.end_ts)
-          if (delta !== 0) return delta
-          return a.index - b.index
-        })
-        .map(({ item }) => item)
-    }
-    const findBestRecognitionParentFlowItem = (
-      flowItems: UnifiedFlowItem[],
-      target: UnifiedFlowItem
-    ): UnifiedFlowItem | null => {
-      const targetTs = toTimestampMs(target.ts || target.end_ts)
-      if (!Number.isFinite(targetTs)) return null
-
-      let bestItem: UnifiedFlowItem | null = null
-      let bestDepth = -1
-      let bestStartMs = Number.NEGATIVE_INFINITY
-      const visit = (items: UnifiedFlowItem[], depth: number) => {
-        for (const item of items) {
-          if (item.type === 'recognition' || item.type === 'recognition_node') {
-            const startMs = toTimestampMs(item.ts || item.end_ts)
-            const endMs = toTimestampMs(item.end_ts || item.ts)
-            const inRange =
-              Number.isFinite(startMs) &&
-              targetTs >= startMs &&
-              (!Number.isFinite(endMs) || targetTs <= endMs + 1)
-            if (inRange) {
-              if (
-                !bestItem ||
-                depth > bestDepth ||
-                (depth === bestDepth && startMs >= bestStartMs)
-              ) {
-                bestItem = item
-                bestDepth = depth
-                bestStartMs = startMs
-              }
-            }
-          }
-          if (item.children && item.children.length > 0) {
-            visit(item.children, depth + 1)
-          }
-        }
-      }
-
-      visit(flowItems, 0)
-      return bestItem
-    }
-    const splitAndAttachWaitFreezesFlowItems = (
-      recognitionFlow: UnifiedFlowItem[],
-      actionFlow: UnifiedFlowItem[],
-      waitFreezesFlow: UnifiedFlowItem[]
-    ) => {
-      const contextItems: UnifiedFlowItem[] = []
-      const nonContextItems: UnifiedFlowItem[] = []
-      for (const item of waitFreezesFlow) {
-        const phase = item.wait_freezes_details?.phase
-        if (phase === 'context') {
-          contextItems.push(item)
-        } else {
-          nonContextItems.push(item)
-        }
-      }
-
-      const unassignedContextItems: UnifiedFlowItem[] = []
-      for (const wfItem of contextItems) {
-        const parent =
-          findBestRecognitionParentFlowItem(recognitionFlow, wfItem) ||
-          findBestRecognitionParentFlowItem(actionFlow, wfItem)
-        if (!parent) {
-          unassignedContextItems.push(wfItem)
-          continue
-        }
-        const mergedChildren = sortFlowItemsByTimestamp([
-          ...(parent.children ?? []),
-          wfItem,
-        ])
-        parent.children = mergedChildren
-      }
-
-      return {
-        recognitionFlow,
-        actionFlow,
-        actionScopeWaitFreezes: sortFlowItemsByTimestamp(nonContextItems),
-        unassignedContextWaitFreezes: sortFlowItemsByTimestamp(unassignedContextItems),
-      }
-    }
-    const partitionActionScopeWaitFreezes = (
-      waitFreezesItems: UnifiedFlowItem[],
-      actionStartTs?: string,
-      actionEndTs?: string,
-      actionStatus?: UnifiedFlowItem['status']
-    ) => {
-      const before: UnifiedFlowItem[] = []
-      const inside: UnifiedFlowItem[] = []
-      const after: UnifiedFlowItem[] = []
-      const startMs = toTimestampMs(actionStartTs)
-      const endMs = actionStatus === 'running'
-        ? Number.POSITIVE_INFINITY
-        : toTimestampMs(actionEndTs)
-      const hasActionWindow = Number.isFinite(startMs) || Number.isFinite(endMs)
-
-      for (const item of waitFreezesItems) {
-        const itemMs = toTimestampMs(item.ts || item.end_ts)
-
-        // No active action window: keep WF at outer timeline level.
-        if (!hasActionWindow) {
-          before.push(item)
-          continue
-        }
-
-        if (Number.isFinite(startMs) && itemMs < startMs) {
-          before.push(item)
-          continue
-        }
-        if (Number.isFinite(endMs) && itemMs > endMs + 1) {
-          after.push(item)
-          continue
-        }
-        inside.push(item)
-      }
-
-      return {
-        before: sortFlowItemsByTimestamp(before),
-        inside: sortFlowItemsByTimestamp(inside),
-        after: sortFlowItemsByTimestamp(after),
-      }
-    }
     const removeFromActiveRecognitionStack = (taskId: number, recoId: number) => {
       for (let i = activeRecognitionStack.length - 1; i >= 0; i--) {
         const frame = activeRecognitionStack[i]
@@ -1469,11 +1344,12 @@ export class LogParser {
         actionFlow: scopedActionFlow,
         actionScopeWaitFreezes,
         unassignedContextWaitFreezes,
-      } = splitAndAttachWaitFreezesFlowItems(
+      } = splitAndAttachWaitFreezesFlowItems({
         recognitionFlow,
         actionFlow,
-        params.waitFreezesFlow
-      )
+        waitFreezesFlow: params.waitFreezesFlow,
+        toTimestampMs,
+      })
       const actionScopeWaitFreezesAll = [...actionScopeWaitFreezes, ...unassignedContextWaitFreezes]
 
       const actionRootBase = params.createActionRoot(actionFlow)
@@ -1481,25 +1357,32 @@ export class LogParser {
         ? {
             ...actionRootBase,
             children: scopedActionFlow.length > 0
-              ? sortFlowItemsByTimestamp([
+              ? sortFlowItemsByTimestamp(
+                [
                   ...(actionRootBase.children ?? []),
                   ...scopedActionFlow,
-                ])
+                ],
+                toTimestampMs
+              )
               : actionRootBase.children,
           }
         : null
 
       const waitFreezesPlacement = partitionActionScopeWaitFreezes(
         actionScopeWaitFreezesAll,
+        toTimestampMs,
         actionRoot?.ts,
         actionRoot?.end_ts,
         actionRoot?.status,
       )
       if (actionRoot && waitFreezesPlacement.inside.length > 0) {
-        actionRoot.children = sortFlowItemsByTimestamp([
-          ...(actionRoot.children ?? []),
-          ...waitFreezesPlacement.inside,
-        ])
+        actionRoot.children = sortFlowItemsByTimestamp(
+          [
+            ...(actionRoot.children ?? []),
+            ...waitFreezesPlacement.inside,
+          ],
+          toTimestampMs
+        )
       }
 
       const nodeFlow = [
