@@ -91,6 +91,7 @@ import {
   finishSubTaskActionNode,
   startSubTaskActionNode,
 } from './logParser/subTaskActionNodeHelpers'
+import { settleCurrentNodeRuntimeStates as settleCurrentNodeRuntimeStatesHelper } from './logParser/runtimeSettlementHelpers'
 import {
   composeFinalPipelineNodeFlow,
   composePipelineNodeFlow,
@@ -988,60 +989,22 @@ export class LogParser {
       fallbackStatus: 'success' | 'failed',
       timestamp: string
     ) => {
-      const endTimestamp = this.stringPool.intern(timestamp)
-      const settleAttempt = (attempt: RecognitionAttempt) => {
-        if (attempt.status !== 'running') return
-        attempt.status = fallbackStatus
-        attempt.end_ts = endTimestamp
-      }
-
-      for (const attempt of currentTaskRecognitions) {
-        settleAttempt(attempt)
-      }
-      for (const attempt of actionLevelRecognitionNodes) {
-        settleAttempt(attempt)
-      }
-
-      const currentTaskKeyPrefix = `${task.task_id}:`
-      for (const [key, attempt] of activeRecognitionAttempts.entries()) {
-        if (!key.startsWith(currentTaskKeyPrefix)) continue
-        settleAttempt(attempt)
-        activeRecognitionAttempts.delete(key)
-        finishedRecognitionKeys.add(key)
-      }
-      for (const key of activeRecognitionNodeAttempts.keys()) {
-        if (!key.startsWith(currentTaskKeyPrefix)) continue
-        const attempt = activeRecognitionNodeAttempts.get(key)
-        if (attempt) settleAttempt(attempt)
-      }
-      for (let i = activeRecognitionStack.length - 1; i >= 0; i--) {
-        if (activeRecognitionStack[i].taskId === task.task_id) {
-          activeRecognitionStack.splice(i, 1)
-        }
-      }
-
-      for (const state of actionRuntimeStates.values()) {
-        if (state.status !== 'running') continue
-        state.status = fallbackStatus
-        state.end_ts = endTimestamp
-      }
-      for (const aggregation of taskScopedNodeAggregationByTaskId.values()) {
-        for (const state of aggregation.waitFreezesRuntimeStates.values()) {
-          if (state.status !== 'running') continue
-          state.status = fallbackStatus
-          state.end_ts = endTimestamp
-        }
-      }
-
-      for (const actionNode of activeSubTaskActionNodes.values()) {
-        if (actionNode.status === 'running') {
-          actionNode.status = fallbackStatus
-          actionNode.end_ts = endTimestamp
-        }
-        if (!nestedActionNodes.includes(actionNode)) {
-          nestedActionNodes.push(actionNode)
-        }
-      }
+      settleCurrentNodeRuntimeStatesHelper({
+        fallbackStatus,
+        timestamp,
+        taskId: task.task_id,
+        currentTaskRecognitions,
+        actionLevelRecognitionNodes,
+        activeRecognitionAttempts,
+        activeRecognitionNodeAttempts,
+        activeRecognitionStack,
+        finishedRecognitionKeys,
+        actionRuntimeStates,
+        taskScopedNodeAggregationByTaskId,
+        activeSubTaskActionNodes,
+        nestedActionNodes,
+        intern: (value) => this.stringPool.intern(value),
+      })
     }
     const upsertCurrentTaskPipelineNode = (node: NodeInfo) => {
       const existingNode = pipelineNodesById.get(node.node_id)
