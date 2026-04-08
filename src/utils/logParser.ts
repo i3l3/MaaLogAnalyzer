@@ -50,7 +50,6 @@ import {
   resolveFallbackRecoDetails,
   splitRecognitionAttemptsByActionWindow,
 } from './logParser/recognitionScopeHelpers'
-import { nestSubTaskActionGroups } from './logParser/subTaskNestingHelpers'
 import {
   applySubTaskSnapshotStarting,
   applySubTaskSnapshotTerminal,
@@ -82,10 +81,12 @@ import {
   withActionTimestamps as withActionTimestampsHelper,
 } from './logParser/nodeEventValueHelpers'
 import {
-  dedupeNestedActionNodes,
-  getLatestActionRuntimeState,
   type ActionRuntimeState,
 } from './logParser/actionRuntimeHelpers'
+import {
+  refreshActivePipelineNodePreview as refreshActivePipelineNodePreviewHelper,
+  resolveFinalNestedActionGroups as resolveFinalNestedActionGroupsHelper,
+} from './logParser/activeNodePreviewHelpers'
 import {
   createActionNodeGroup,
   finishSubTaskActionNode,
@@ -662,102 +663,43 @@ export class LogParser {
       endTimestamp: string,
       groups: NestedActionGroup[]
     ): NestedActionGroup[] => {
-      const nestedSubTaskGroups = nestSubTaskActionGroups({
-        groups,
-        rootTaskId: task.task_id,
-        subTaskParentByTaskId,
-        toTimestampMs,
-        cloneGroup: (group) => cloneNestedActionGroup(group, cloneRecognitionAttempt),
-      })
-      if (nestedSubTaskGroups.length > 0) {
-        return nestedSubTaskGroups
-      }
-      const fallbackActionGroup = createActionNodeGroup({
+      return resolveFinalNestedActionGroupsHelper({
         taskId,
-        ts: startTimestamp,
-        endTs: endTimestamp,
-        nestedActions: nestedActionNodes.slice(),
+        rootTaskId: task.task_id,
+        startTimestamp,
+        endTimestamp,
+        groups,
+        subTaskParentByTaskId,
+        nestedActionNodes,
+        createActionNodeGroup,
+        cloneNestedActionGroup,
+        cloneRecognitionAttempt,
+        toTimestampMs,
         intern: (value) => this.stringPool.intern(value),
       })
-      return fallbackActionGroup ? [fallbackActionGroup] : []
     }
-    const latestActionRuntimeState = () => getLatestActionRuntimeState(actionRuntimeStates)
     const refreshActivePipelineNodePreview = (timestamp: string) => {
-      const activeNode = getActivePipelineNode()
-      if (!activeNode) return
-
-      const nowTimestamp = this.stringPool.intern(timestamp)
-      activeNode.end_ts = nowTimestamp
-      activeNode.next_list = getTaskNextList(taskScopedNodeAggregationByTaskId, task.task_id)
-
-      const topLevelRecognitions = dedupeRecognitionAttempts(currentTaskRecognitions)
-      const actionRecognitions = dedupeRecognitionAttempts(actionLevelRecognitionNodes)
-      const runtimeNestedActionNodes = dedupeNestedActionNodes([
-        ...nestedActionNodes,
-        ...activeSubTaskActionNodes.values(),
-      ])
-
-      const runtimeActionGroup = createActionNodeGroup({
-        taskId: task.task_id,
-        ts: activeNode.ts,
-        endTs: nowTimestamp,
-        nestedActions: runtimeNestedActionNodes,
-        intern: (value) => this.stringPool.intern(value),
-      })
-      const runtimeNestedActionGroups: NestedActionGroup[] = runtimeActionGroup ? [runtimeActionGroup] : []
-
-      const runtimeActionState = latestActionRuntimeState()
-      const resolvedActionId =
-        runtimeActionState?.action_id ??
-        activeNode.action_details?.action_id ??
-        activeNode.node_details?.action_id ??
-        activeNode.node_id
-      const composedFlow = composePipelineNodeFlow({
-        topLevelRecognitions,
-        actionLevelRecognitions: actionRecognitions,
-        nestedActionGroups: runtimeNestedActionGroups,
-        waitFreezesFlow: buildWaitFreezesFlowItems(
+      refreshActivePipelineNodePreviewHelper({
+        timestamp,
+        rootTaskId: task.task_id,
+        getActivePipelineNode,
+        getTaskNextList: () => getTaskNextList(taskScopedNodeAggregationByTaskId, task.task_id),
+        currentTaskRecognitions,
+        actionLevelRecognitionNodes,
+        nestedActionNodes,
+        activeSubTaskActionNodes,
+        actionRuntimeStates,
+        createActionNodeGroup,
+        composePipelineNodeFlow,
+        summarizeActionFlowStatus,
+        createActionRootFlowItem,
+        buildWaitFreezesFlowItems: () => buildWaitFreezesFlowItems(
           taskScopedNodeAggregationByTaskId.get(task.task_id)?.waitFreezesRuntimeStates
         ),
-        createActionRoot: (actionFlow) => {
-          const inferredActionStatus = summarizeActionFlowStatus(actionFlow)
-          const actionRootStatus = runtimeActionState?.status ?? inferredActionStatus
-          if (!actionRootStatus) return null
-
-          const runtimeActionErrorImage = actionRootStatus === 'failed'
-            ? this.findErrorImageByNames(nowTimestamp, [
-                runtimeActionState?.name,
-                activeNode.action_details?.name,
-                activeNode.node_details?.name,
-                activeNode.reco_details?.name,
-                activeNode.name,
-              ])
-            : undefined
-
-          return createActionRootFlowItem({
-            actionId: resolvedActionId,
-            name:
-              runtimeActionState?.name ||
-              activeNode.action_details?.name ||
-              activeNode.name,
-            status: actionRootStatus,
-            ts: runtimeActionState?.ts || activeNode.action_details?.ts || activeNode.ts,
-            endTs: runtimeActionState?.end_ts || activeNode.action_details?.end_ts || nowTimestamp,
-            actionDetails: activeNode.action_details,
-            errorImage: runtimeActionErrorImage,
-          })
-        },
+        findErrorImageByNames: (eventTs, names) => this.findErrorImageByNames(eventTs, names),
+        intern: (value) => this.stringPool.intern(value),
+        dedupeRecognitionAttempts,
       })
-
-      activeNode.node_flow = composedFlow.nodeFlow
-
-      const fallbackRecoDetails =
-        topLevelRecognitions.length > 0
-          ? topLevelRecognitions[topLevelRecognitions.length - 1].reco_details
-          : undefined
-      if (fallbackRecoDetails) {
-        activeNode.reco_details = markRaw(fallbackRecoDetails)
-      }
     }
 
     // 子任务事件收集器
