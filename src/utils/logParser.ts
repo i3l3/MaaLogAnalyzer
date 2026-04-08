@@ -8,7 +8,6 @@ import type {
   NestedActionGroup,
   NestedActionNode,
   UnifiedFlowItem,
-  WaitFreezesDetail,
 } from '../types'
 import { StringPool } from './stringPool'
 import { buildActionFlowItems, buildRecognitionFlowItems } from './nodeFlow'
@@ -67,6 +66,11 @@ import {
   mergeSubTaskActionGroupWithSnapshot,
   type SubTaskSnapshot,
 } from './logParserSubTaskSnapshotHelpers'
+import {
+  buildWaitFreezesFlowItems,
+  upsertWaitFreezesState,
+  type WaitFreezesRuntimeState,
+} from './logParserWaitFreezesHelpers'
 
 export interface ParseProgress {
   current: number
@@ -571,21 +575,6 @@ export class LogParser {
 
     const taskEvents = this.events.slice(taskStartIndex, taskEndIndex + 1)
 
-    type WaitFreezesRuntimeState = {
-      wf_id: number
-      name: string
-      phase?: string
-      ts: string
-      end_ts?: string
-      status: 'running' | 'success' | 'failed'
-      elapsed?: number
-      reco_ids?: number[]
-      roi?: [number, number, number, number]
-      param?: WaitFreezesDetail['param']
-      focus?: any
-      images?: string[]
-      order: number
-    }
     type TaskScopedNodeAggregation = {
       nextList: NextListItem[]
       waitFreezesRuntimeStates: Map<number, WaitFreezesRuntimeState>
@@ -767,30 +756,6 @@ export class LogParser {
       if (details.focus == null) return fallback
       return markRaw(details.focus)
     }
-    const normalizeWaitFreezesId = (value: unknown): number | null => {
-      const wfId = typeof value === 'number' ? value : Number(value)
-      return Number.isFinite(wfId) ? wfId : null
-    }
-    const toWaitFreezesFlowItem = (state: WaitFreezesRuntimeState): UnifiedFlowItem => {
-      return {
-        id: `node.wait_freezes.${state.wf_id}`,
-        type: 'wait_freezes',
-        name: state.name || 'WaitFreezes',
-        status: state.status,
-        ts: state.ts,
-        end_ts: state.end_ts,
-        wait_freezes_details: markRaw({
-          wf_id: state.wf_id,
-          phase: state.phase,
-          elapsed: state.elapsed,
-          reco_ids: state.reco_ids,
-          roi: state.roi,
-          param: state.param,
-          focus: state.focus,
-          images: state.images,
-        }),
-      }
-    }
     const sortFlowItemsByTimestamp = (items: UnifiedFlowItem[]): UnifiedFlowItem[] => {
       return items
         .map((item, index) => ({ item, index }))
@@ -920,64 +885,6 @@ export class LogParser {
         inside: sortFlowItemsByTimestamp(inside),
         after: sortFlowItemsByTimestamp(after),
       }
-    }
-    const buildWaitFreezesFlowItems = (taskId: number): UnifiedFlowItem[] => {
-      const waitFreezesRuntimeStates = taskScopedNodeAggregationByTaskId.get(taskId)?.waitFreezesRuntimeStates
-      if (!waitFreezesRuntimeStates || waitFreezesRuntimeStates.size === 0) {
-        return []
-      }
-      return Array.from(waitFreezesRuntimeStates.values())
-        .sort((a, b) => {
-          const delta = a.order - b.order
-          if (delta !== 0) return delta
-          return a.wf_id - b.wf_id
-        })
-        .map(toWaitFreezesFlowItem)
-    }
-    const upsertWaitFreezesState = (
-      taskId: number,
-      details: Record<string, any>,
-      timestamp: string,
-      status: 'running' | 'success' | 'failed',
-      eventOrder: number
-    ) => {
-      const wfId = normalizeWaitFreezesId(readNumberField(details, 'wf_id') ?? details.wf_id)
-      if (wfId == null) return
-
-      const aggregation = getOrCreateTaskNodeAggregation(taskId)
-      const existing = aggregation.waitFreezesRuntimeStates.get(wfId)
-      const nowTs = this.stringPool.intern(timestamp)
-      const fallbackName = (typeof details.name === 'string' && details.name.trim())
-        ? details.name
-        : existing?.name
-      const activeNodeName = taskId === task.task_id
-        ? getActivePipelineNode()?.name
-        : undefined
-      const name = this.stringPool.intern(fallbackName || activeNodeName || 'WaitFreezes')
-      const rawPhase = typeof details.phase === 'string' ? details.phase.trim() : ''
-      const phase = rawPhase ? this.stringPool.intern(rawPhase) : existing?.phase
-      const elapsed = typeof details.elapsed === 'number' ? details.elapsed : existing?.elapsed
-      const recoIds = parseNumericArray(details.reco_ids) ?? existing?.reco_ids
-      const roi = parseRoi(details.roi) ?? existing?.roi
-      const param = parseWaitFreezesParam(details.param) ?? existing?.param
-      const focus = resolveEventFocus(details, existing?.focus)
-      const images = this.findWaitFreezesImages(timestamp, name) ?? existing?.images
-
-      aggregation.waitFreezesRuntimeStates.set(wfId, {
-        wf_id: wfId,
-        name,
-        phase,
-        ts: existing?.ts || nowTs,
-        end_ts: status === 'running' ? (existing?.end_ts || nowTs) : nowTs,
-        status,
-        elapsed,
-        reco_ids: recoIds,
-        roi,
-        param,
-        focus,
-        images,
-        order: existing?.order ?? eventOrder,
-      })
     }
     const removeFromActiveRecognitionStack = (taskId: number, recoId: number) => {
       for (let i = activeRecognitionStack.length - 1; i >= 0; i--) {
@@ -1470,7 +1377,9 @@ export class LogParser {
         topLevelRecognitions: params.topLevelRecognitions,
         actionLevelRecognitions: params.actionLevelRecognitions,
         nestedActionGroups: params.nestedActionGroups,
-        waitFreezesFlow: buildWaitFreezesFlowItems(params.taskId),
+        waitFreezesFlow: buildWaitFreezesFlowItems(
+          taskScopedNodeAggregationByTaskId.get(params.taskId)?.waitFreezesRuntimeStates
+        ),
         createActionRoot: createFinalActionRootFactory({
           actionDetails: params.actionDetails,
           fallbackStatus: params.fallbackStatus,
@@ -1639,7 +1548,9 @@ export class LogParser {
         topLevelRecognitions,
         actionLevelRecognitions: actionRecognitions,
         nestedActionGroups: runtimeNestedActionGroups,
-        waitFreezesFlow: buildWaitFreezesFlowItems(task.task_id),
+        waitFreezesFlow: buildWaitFreezesFlowItems(
+          taskScopedNodeAggregationByTaskId.get(task.task_id)?.waitFreezesRuntimeStates
+        ),
         createActionRoot: (actionFlow) => {
           const inferredActionStatus = summarizeActionFlowStatus(actionFlow)
           const actionRootStatus = runtimeActionState?.status ?? inferredActionStatus
@@ -2060,7 +1971,18 @@ export class LogParser {
     ): boolean => {
       if (taskId != null) {
         const waitFreezesStatus = resolveRuntimeStatusFromPhase(phase)
-        upsertWaitFreezesState(taskId, details, timestamp, waitFreezesStatus, eventOrder)
+        const aggregation = getOrCreateTaskNodeAggregation(taskId)
+        upsertWaitFreezesState({
+          runtimeStates: aggregation.waitFreezesRuntimeStates,
+          details,
+          timestamp,
+          status: waitFreezesStatus,
+          eventOrder,
+          activeNodeName: taskId === task.task_id ? getActivePipelineNode()?.name : undefined,
+          intern: (value) => this.stringPool.intern(value),
+          resolveEventFocus,
+          findWaitFreezesImages: (ts, actionName) => this.findWaitFreezesImages(ts, actionName),
+        })
         onUpdated?.(details)
       }
       refreshActivePipelineNodePreview(timestamp)
