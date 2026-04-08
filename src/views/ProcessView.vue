@@ -9,6 +9,7 @@ import type { LoadedTextFile } from './process/utils/fileLoadingHelpers'
 import { useProcessViewController } from './process/composables/useProcessViewController'
 import ProcessMobileToolbar from './process/components/ProcessMobileToolbar.vue'
 import ProcessContentSection from './process/components/ProcessContentSection.vue'
+import type { NodeNavMode } from './process/composables/useNodeNavSearch'
 
 const props = defineProps<{
   tasks: TaskInfo[]
@@ -65,6 +66,8 @@ const {
   nodeNavSearchText,
   normalizedNodeNavSearchText,
   nodeNavFailedOnly,
+  nodeNavMode,
+  setNodeNavMode,
   toggleNodeNavFailedOnly,
   nodeNavItems,
   nodeNavEmptyDescription,
@@ -163,6 +166,7 @@ void fileInputRef
       :node-nav-search-text="nodeNavSearchText"
       :normalized-node-nav-search-text="normalizedNodeNavSearchText"
       :node-nav-failed-only="nodeNavFailedOnly"
+      :node-nav-mode="nodeNavMode"
       :node-nav-empty-description="nodeNavEmptyDescription"
       :set-task-list-panel-ref="setTaskListPanelRef"
       :set-node-nav-panel-ref="setNodeNavPanelRef"
@@ -186,6 +190,7 @@ void fileInputRef
       :on-select-task-index="handleTabChange"
       :on-toggle-follow="toggleFollowLast"
       :on-update-node-nav-search-text="(value) => nodeNavSearchText = value"
+      :on-update-node-nav-mode="(value: NodeNavMode) => setNodeNavMode(value)"
       :on-toggle-node-nav-failed-only="toggleNodeNavFailedOnly"
       :on-select-node-nav="scrollToNode"
       :on-manual-scroll-up="stopFollowOnScrollUp"

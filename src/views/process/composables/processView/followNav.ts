@@ -36,10 +36,15 @@ export const useProcessFollowNav = (
     nodeNavSearchText,
     normalizedNodeNavSearchText,
     nodeNavFailedOnly,
+    nodeNavMode,
+    setNodeNavMode,
     toggleNodeNavFailedOnly,
     nodeNavItems,
     nodeNavEmptyDescription,
-  } = useNodeNavSearch(currentNodes)
+  } = useNodeNavSearch(
+    currentNodes,
+    computed(() => options.props.selectedTask?.task_id ?? null),
+  )
 
   const setTaskListPanelRef = (instance: unknown | null) => {
     taskListPanelRef.value = instance as { scrollToBottom: () => void } | null
@@ -61,6 +66,8 @@ export const useProcessFollowNav = (
     nodeNavSearchText,
     normalizedNodeNavSearchText,
     nodeNavFailedOnly,
+    nodeNavMode,
+    setNodeNavMode,
     toggleNodeNavFailedOnly,
     nodeNavItems,
     nodeNavEmptyDescription,

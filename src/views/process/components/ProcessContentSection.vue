@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { NodeInfo, TaskInfo } from '../../../types'
-import type { NodeNavViewItem } from '../composables/useNodeNavSearch'
+import type { NodeNavMode, NodeNavViewItem } from '../composables/useNodeNavSearch'
 import type { VNodeChild } from 'vue'
 import EmptyUploadPanel from './EmptyUploadPanel.vue'
 import ProcessMobilePane from './ProcessMobilePane.vue'
@@ -43,6 +43,7 @@ const props = defineProps<{
   nodeNavSearchText: string
   normalizedNodeNavSearchText: string
   nodeNavFailedOnly: boolean
+  nodeNavMode: NodeNavMode
   nodeNavEmptyDescription: string
   setTaskListPanelRef: (instance: unknown | null) => void
   setNodeNavPanelRef: (instance: unknown | null) => void
@@ -66,6 +67,7 @@ const props = defineProps<{
   onSelectTaskIndex: (index: number) => void
   onToggleFollow: () => void
   onUpdateNodeNavSearchText: (text: string) => void
+  onUpdateNodeNavMode: (mode: NodeNavMode) => void
   onToggleNodeNavFailedOnly: () => void
   onSelectNodeNav: (index: number) => void
   onManualScrollUp: () => void
@@ -132,6 +134,7 @@ const props = defineProps<{
         :node-nav-search-text="props.nodeNavSearchText"
         :normalized-node-nav-search-text="props.normalizedNodeNavSearchText"
         :node-nav-failed-only="props.nodeNavFailedOnly"
+        :node-nav-mode="props.nodeNavMode"
         :node-nav-empty-description="props.nodeNavEmptyDescription"
         :is-vscode-launch-embed="props.isVscodeLaunchEmbed"
         :bridge-request-task-doc="props.bridgeRequestTaskDoc"
@@ -147,6 +150,7 @@ const props = defineProps<{
         @toggle-follow="props.onToggleFollow"
         @reload-select="props.onReloadSelect"
         @update:node-nav-search-text="props.onUpdateNodeNavSearchText"
+        @update:node-nav-mode="props.onUpdateNodeNavMode"
         @toggle-node-nav-failed-only="props.onToggleNodeNavFailedOnly"
         @select-node-nav="props.onSelectNodeNav"
         @manual-scroll-up="props.onManualScrollUp"

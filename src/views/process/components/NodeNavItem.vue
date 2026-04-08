@@ -2,12 +2,13 @@
 import { computed } from 'vue'
 import { NFlex, NText, NTag } from 'naive-ui'
 import type { NodeInfo } from '../../../types'
-import type { NodeNavViewItem } from '../composables/useNodeNavSearch'
+import type { NodeNavMode, NodeNavViewItem } from '../composables/useNodeNavSearch'
 import { extractTime } from '../../../utils/formatDuration'
 import { getRuntimeStatusTagType, getRuntimeStatusText } from '../../../utils/runtimeStatus'
 
 const props = defineProps<{
   item: NodeNavViewItem
+  mode: NodeNavMode
   displayMode: string
   normalizedSearchText: string
 }>()
@@ -26,13 +27,13 @@ const getNodeNavDotClass = (status: NodeInfo['status']) => {
 <template>
   <n-flex v-if="displayMode === 'detailed'" vertical style="gap: 4px">
     <n-flex align="center" style="gap: 8px">
-      <n-text strong style="font-size: 13px">{{ item.node.name || '未命名节点' }}</n-text>
+      <n-text strong style="font-size: 13px">{{ item.primaryText || '未命名节点' }}</n-text>
       <n-text depth="3" style="font-size: 11px">
         {{ extractTime(item.node.ts) }}
       </n-text>
     </n-flex>
     <n-flex align="center" style="gap: 8px">
-      <n-tag size="small" :type="getRuntimeStatusTagType(item.node.status)">
+      <n-tag v-if="mode === 'pipeline'" size="small" :type="getRuntimeStatusTagType(item.node.status)">
         {{ getRuntimeStatusText(item.node.status) }}
       </n-tag>
       <n-tag
@@ -57,9 +58,9 @@ const getNodeNavDotClass = (status: NodeInfo['status']) => {
 
   <n-flex v-else vertical :style="{ gap: displayMode === 'compact' ? '2px' : '2px' }">
     <n-flex align="center" :style="{ gap: displayMode === 'compact' ? '6px' : '4px' }">
-      <span class="nav-status-dot" :class="getNodeNavDotClass(item.node.status)" />
+      <span v-if="mode === 'pipeline'" class="nav-status-dot" :class="getNodeNavDotClass(item.node.status)" />
       <n-text style="font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
-        {{ item.node.name || '未命名节点' }}
+        {{ item.primaryText || '未命名节点' }}
       </n-text>
       <n-tag
         v-if="showMatchDetails"

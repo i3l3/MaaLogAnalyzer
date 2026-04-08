@@ -4,7 +4,7 @@ import {
   NCard, NEmpty,
 } from 'naive-ui'
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
-import type { NodeNavViewItem } from '../composables/useNodeNavSearch'
+import type { NodeNavMode, NodeNavViewItem } from '../composables/useNodeNavSearch'
 import NodeNavItem from './NodeNavItem.vue'
 import NodeNavHeader from './NodeNavHeader.vue'
 import NodeNavSearchInput from './NodeNavSearchInput.vue'
@@ -17,11 +17,13 @@ const props = defineProps<{
   searchText: string
   normalizedSearchText: string
   failedOnly: boolean
+  mode: NodeNavMode
   emptyDescription: string
 }>()
 
 const emit = defineEmits<{
   'update:search-text': [value: string]
+  'update:mode': [value: NodeNavMode]
   'toggle-failed-only': []
   'select-node': [index: number]
   'manual-scroll-up': []
@@ -120,6 +122,8 @@ defineExpose({
     <template #header>
       <node-nav-header
         :failed-only="props.failedOnly"
+        :mode="props.mode"
+        @update:mode="emit('update:mode', $event)"
         @toggle-failed-only="emit('toggle-failed-only')"
         @scroll-top="scrollToTop"
         @scroll-bottom="scrollToBottom"
@@ -159,6 +163,7 @@ defineExpose({
             >
               <node-nav-item
                 :item="item"
+                :mode="props.mode"
                 :display-mode="props.displayMode"
                 :normalized-search-text="props.normalizedSearchText"
               />

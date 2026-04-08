@@ -15,6 +15,7 @@ const createNode = (params: { nodeId: number; name: string }): NodeInfo => ({
 const createNavItem = (node: NodeInfo, originalIndex: number): NodeNavViewItem => ({
   node,
   originalIndex,
+  primaryText: node.name,
   matchDetails: [],
   matchKinds: [],
   matchHint: '',

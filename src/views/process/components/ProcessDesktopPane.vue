@@ -5,7 +5,7 @@ import ProcessTimelineToolbar from './ProcessTimelineToolbar.vue'
 import NodeNavPanel from './NodeNavPanel.vue'
 import ProcessTimelineListPane from './ProcessTimelineListPane.vue'
 import type { NodeInfo, TaskInfo } from '../../../types'
-import type { NodeNavViewItem } from '../composables/useNodeNavSearch'
+import type { NodeNavMode, NodeNavViewItem } from '../composables/useNodeNavSearch'
 import type { VNodeChild } from 'vue'
 import { resolveNodeByOriginalIndex } from '../composables/nodeNavSelection'
 
@@ -41,6 +41,7 @@ const props = defineProps<{
   nodeNavSearchText: string
   normalizedNodeNavSearchText: string
   nodeNavFailedOnly: boolean
+  nodeNavMode: NodeNavMode
   nodeNavEmptyDescription: string
   isVscodeLaunchEmbed?: boolean
   bridgeRequestTaskDoc?: ((task: string) => Promise<string | null>) | null
@@ -59,6 +60,7 @@ const emit = defineEmits<{
   'toggle-follow': []
   'reload-select': [key: string]
   'update:node-nav-search-text': [value: string]
+  'update:node-nav-mode': [value: NodeNavMode]
   'toggle-node-nav-failed-only': []
   'select-node-nav': [index: number]
   'manual-scroll-up': []
@@ -126,8 +128,10 @@ const handleSelectNodeNav = (index: number) => {
         :search-text="nodeNavSearchText"
         :normalized-search-text="normalizedNodeNavSearchText"
         :failed-only="nodeNavFailedOnly"
+        :mode="nodeNavMode"
         :empty-description="nodeNavEmptyDescription"
         @update:search-text="emit('update:node-nav-search-text', $event)"
+        @update:mode="emit('update:node-nav-mode', $event)"
         @toggle-failed-only="emit('toggle-node-nav-failed-only')"
         @select-node="handleSelectNodeNav"
         @manual-scroll-up="emit('manual-scroll-up')"

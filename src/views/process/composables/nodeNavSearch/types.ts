@@ -10,6 +10,7 @@ export interface NodeNavMatchDetail {
 export interface NodeNavViewItem {
   node: NodeInfo
   originalIndex: number
+  primaryText: string
   matchDetails: NodeNavMatchDetail[]
   matchKinds: NodeNavMatchKind[]
   matchHint: string
