@@ -125,7 +125,6 @@ import { settleCurrentNodeRuntimeStates as settleCurrentNodeRuntimeStatesHelper 
 import {
   type ScopedActionEventHandler,
   type ScopedActionNodeEventHandler,
-  type ScopedNodeDispatchConfig,
   type ScopedPipelineNodeStartingHandler,
 } from './logParser/scopedNodeDispatchHelpers'
 import { createNodeDispatchConfigs } from './logParser/nodeDispatchConfigFactory'
@@ -1018,34 +1017,6 @@ export class LogParser {
         skipRecognitionRefreshWhenTaskMissingOnFinish,
       })
     }
-    const handleRecognitionNodeLifecycleEvent = (
-      taskId: number | null,
-      phase: KnownMaaPhase,
-      details: Record<string, any>,
-      timestamp: string,
-      eventOrder: number,
-      dispatchPendingRecognition: (taskId: number, recognition: RecognitionAttempt) => void,
-      dispatchStandaloneRecognition: (taskId: number, recognition: RecognitionAttempt) => void,
-      excludeParentTaskId?: number,
-      dispatchDetachedRecognition?: (recognition: RecognitionAttempt) => void
-    ): void => {
-      handleRecognitionNodeLifecycleEventHelper({
-        taskId,
-        phase,
-        details,
-        timestamp,
-        eventOrder,
-        dispatchPendingRecognition,
-        dispatchStandaloneRecognition,
-        excludeParentTaskId,
-        dispatchDetachedRecognition,
-        startRecognitionNodeEvent,
-        finalizeRecognitionNodeEvent,
-        resolveTerminalCompletionStatus,
-        consumeRecognitions: (id) => subTasks.consumeRecognitions(id),
-        refresh: refreshActivePipelineNodePreview,
-      })
-    }
     const handleSubTaskActionNodeLifecycleEvent: ScopedActionNodeEventHandler = (
       subTaskId: number | null,
       phase: KnownMaaPhase,
@@ -1130,34 +1101,6 @@ export class LogParser {
       })
       refreshActivePipelineNodePreview(timestamp)
     }
-    const handleScopedNodeEvent = (
-      taskId: number | null,
-      messageMeta: MaaMessageMeta,
-      details: Record<string, any>,
-      timestamp: string,
-      eventOrder: number,
-      config: ScopedNodeDispatchConfig
-    ) => {
-      handleScopedNodeEventHelper({
-        taskId,
-        messageMeta,
-        details,
-        timestamp,
-        eventOrder,
-        config,
-        handleRecognitionNodeLifecycleEvent: (args) => handleRecognitionNodeLifecycleEvent(
-          args.taskId,
-          args.phase,
-          args.details,
-          args.timestamp,
-          args.eventOrder,
-          args.dispatchPendingRecognition,
-          args.dispatchStandaloneRecognition,
-          args.excludeParentTaskId,
-          args.dispatchDetachedRecognition,
-        ),
-      })
-    }
     const {
       currentTaskNodeDispatchConfig,
       subTaskNodeDispatchConfig,
@@ -1193,7 +1136,34 @@ export class LogParser {
       rootTaskId: task.task_id,
       getCachedMaaMessageMeta: (message) => this.getCachedMaaMessageMeta(message),
       taskLifecycleMetaContext,
-      handleScopedNodeEvent,
+      handleScopedNodeEvent: (taskId, messageMeta, details, timestamp, eventOrder, config) => {
+        handleScopedNodeEventHelper({
+          taskId,
+          messageMeta,
+          details,
+          timestamp,
+          eventOrder,
+          config,
+          handleRecognitionNodeLifecycleEvent: (args) => {
+            handleRecognitionNodeLifecycleEventHelper({
+              taskId: args.taskId,
+              phase: args.phase,
+              details: args.details,
+              timestamp: args.timestamp,
+              eventOrder: args.eventOrder,
+              dispatchPendingRecognition: args.dispatchPendingRecognition,
+              dispatchStandaloneRecognition: args.dispatchStandaloneRecognition,
+              excludeParentTaskId: args.excludeParentTaskId,
+              dispatchDetachedRecognition: args.dispatchDetachedRecognition,
+              startRecognitionNodeEvent,
+              finalizeRecognitionNodeEvent,
+              resolveTerminalCompletionStatus,
+              consumeRecognitions: (id) => subTasks.consumeRecognitions(id),
+              refresh: refreshActivePipelineNodePreview,
+            })
+          },
+        })
+      },
       currentTaskNodeDispatchConfig,
       subTaskNodeDispatchConfig,
     })
