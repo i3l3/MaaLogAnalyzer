@@ -5,7 +5,6 @@ import type {
   NodeInfo,
   RecognitionAttempt,
   NestedActionGroup,
-  NestedActionNode,
 } from '../types'
 import { StringPool } from './stringPool'
 import {
@@ -55,7 +54,6 @@ import {
   applySubTaskSnapshotTerminal,
   getOrCreateSubTaskSnapshot,
   mergeSubTaskActionGroupWithSnapshot,
-  type SubTaskSnapshot,
 } from './logParser/subTaskSnapshotHelpers'
 import {
   buildWaitFreezesFlowItems,
@@ -65,13 +63,12 @@ import { handleWaitFreezesNodeEvent as handleWaitFreezesNodeEventHelper } from '
 import {
   getOrCreateTaskNodeAggregation,
   getTaskNextList,
-  type TaskScopedNodeAggregation,
 } from './logParser/taskScopedAggregationHelpers'
-import { createTaskStackTracker } from './logParser/taskStackHelpers'
 import {
   findImageByTimestampSuffix,
   findWaitFreezesImages,
 } from './logParser/imageLookupHelpers'
+import { createTaskNodeRuntimeContext } from './logParser/taskNodeRuntimeContext'
 import { buildTasksFromEvents } from './logParser/taskBuilder'
 import {
   parseRecognitionAnchorName as parseRecognitionAnchorNameHelper,
@@ -80,9 +77,6 @@ import {
   toNextListItems as toNextListItemsHelper,
   withActionTimestamps as withActionTimestampsHelper,
 } from './logParser/nodeEventValueHelpers'
-import {
-  type ActionRuntimeState,
-} from './logParser/actionRuntimeHelpers'
 import {
   refreshActivePipelineNodePreview as refreshActivePipelineNodePreviewHelper,
   resolveFinalNestedActionGroups as resolveFinalNestedActionGroupsHelper,
@@ -431,8 +425,38 @@ export class LogParser {
    * 获取任务的所有节点
    */
   private getTaskNodes(task: TaskInfo): NodeInfo[] {
-    const nodes: NodeInfo[] = []
-    const pipelineNodesById = new Map<number, NodeInfo>()
+    const {
+      nodes,
+      pipelineNodesById,
+      taskScopedNodeAggregationByTaskId,
+      currentTaskRecognitions,
+      actionLevelRecognitionNodes,
+      nestedActionNodes,
+      pipelineNodeStartTimes,
+      recognitionNodeStartTimes,
+      activeRecognitionNodeAttempts,
+      actionStartTimes,
+      actionEndTimes,
+      actionStartOrders,
+      actionEndOrders,
+      actionNodeStartTimes,
+      actionRuntimeStates,
+      activeSubTaskActionNodes,
+      subTaskPipelineNodeStartTimes,
+      subTaskRecognitionNodeStartTimes,
+      subTaskActionStartTimes,
+      subTaskActionEndTimes,
+      subTaskActionStartOrders,
+      subTaskActionEndOrders,
+      subTaskActionNodeStartTimes,
+      subTaskSnapshots,
+      subTaskParentByTaskId,
+      taskStackTracker,
+      activeRecognitionAttempts,
+      activeRecognitionStack,
+      finishedRecognitionKeys,
+      recognitionOrderMeta,
+    } = createTaskNodeRuntimeContext(task.task_id)
     let activePipelineNodeId: number | null = null
 
     const taskStartIndex = task._startEventIndex ?? -1
@@ -441,36 +465,7 @@ export class LogParser {
 
     const taskEvents = this.events.slice(taskStartIndex, taskEndIndex + 1)
 
-    // 当前节点的累积状态
-    const taskScopedNodeAggregationByTaskId = new Map<number, TaskScopedNodeAggregation>()
-    const currentTaskRecognitions: RecognitionAttempt[] = []
-    const actionLevelRecognitionNodes: RecognitionAttempt[] = []
-    const nestedActionNodes: NestedActionNode[] = []
-    const pipelineNodeStartTimes = new Map<number, string>()
-    const recognitionNodeStartTimes = new Map<number, string>()
-    const activeRecognitionNodeAttempts = new Map<string, RecognitionAttempt>()
-    const actionStartTimes = new Map<number, string>()
-    const actionEndTimes = new Map<number, string>()
-    const actionStartOrders = new Map<number, number>()
-    const actionEndOrders = new Map<number, number>()
-    const actionNodeStartTimes = new Map<number, string>()
-    const actionRuntimeStates = new Map<number, ActionRuntimeState>()
-    const activeSubTaskActionNodes = new Map<string, NestedActionNode>()
-    const subTaskPipelineNodeStartTimes = new Map<string, string>()
-    const subTaskRecognitionNodeStartTimes = new Map<string, string>()
-    const subTaskActionStartTimes = new Map<string, string>()
-    const subTaskActionEndTimes = new Map<string, string>()
-    const subTaskActionStartOrders = new Map<string, number>()
-    const subTaskActionEndOrders = new Map<string, number>()
-    const subTaskActionNodeStartTimes = new Map<string, string>()
-    const subTaskSnapshots = new Map<number, SubTaskSnapshot>()
-    const subTaskParentByTaskId = new Map<number, number>()
     let syntheticSubTaskPipelineNodeId = -1
-    const taskStackTracker = createTaskStackTracker(task.task_id)
-    const activeRecognitionAttempts = new Map<string, RecognitionAttempt>()
-    const activeRecognitionStack: Array<{ taskId: number; recoId: number }> = []
-    const finishedRecognitionKeys = new Set<string>()
-    const recognitionOrderMeta = new WeakMap<RecognitionAttempt, { startSeq: number; endSeq: number }>()
     const {
       attachNodeToAttempt,
       attachRecognitionNodesToAttempts,
