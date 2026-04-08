@@ -46,9 +46,13 @@ defineExpose({
     content-style="padding: 0; flex: 1; min-height: 0; overflow: visible"
   >
     <template #header>
-      <n-flex align="center" justify="space-between" style="padding-right: 16px">
-        <n-text style="font-size: 14px; font-weight: 500">任务列表</n-text>
-        <n-flex align="center" style="gap: 2px">
+      <n-flex
+        align="center"
+        justify="space-between"
+        style="padding-right: 10px; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden"
+      >
+        <n-text style="font-size: 14px; font-weight: 500; white-space: nowrap; flex-shrink: 0">任务列表</n-text>
+        <n-flex align="center" style="gap: 2px; flex-wrap: nowrap; flex-shrink: 0; margin-left: 0">
           <n-button text size="tiny" @click="scrollToTop" title="跳转顶部">
             <n-icon size="16"><vertical-align-top-outlined /></n-icon>
           </n-button>
