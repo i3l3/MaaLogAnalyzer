@@ -19,8 +19,6 @@ import {
   type TaskTerminalPhase,
 } from './logParser/eventMeta'
 import {
-  handleTaskLifecycleMetaEvent,
-  resolveEventTaskId,
   resolveTaskLifecycleEventDetails,
   type TaskLifecycleMetaEventContext,
 } from './logParser/taskLifecycle'
@@ -70,6 +68,7 @@ import {
 } from './logParser/imageLookupHelpers'
 import { createTaskNodeRuntimeContext } from './logParser/taskNodeRuntimeContext'
 import { buildTasksFromEvents } from './logParser/taskBuilder'
+import { processTaskEvents } from './logParser/taskEventLoopHelpers'
 import {
   parseRecognitionAnchorName as parseRecognitionAnchorNameHelper,
   resolveEventFocus,
@@ -1233,35 +1232,15 @@ export class LogParser {
         )
       },
     }
-    for (let eventIndex = 0; eventIndex < taskEvents.length; eventIndex++) {
-      const event = taskEvents[eventIndex]
-      const eventOrder = eventIndex
-      const timestamp = event.timestamp
-      const { message, details } = event
-      const messageMeta = this.getCachedMaaMessageMeta(message)
-      const eventTaskId = resolveEventTaskId(details)
-
-      handleTaskLifecycleMetaEvent(
-        taskLifecycleMetaContext,
-        messageMeta,
-        eventTaskId,
-        details,
-        message,
-        timestamp,
-      )
-
-      if (messageMeta.domain !== 'Node') continue
-      const isCurrentTask = eventTaskId === task.task_id
-
-      handleScopedNodeEvent(
-        isCurrentTask ? task.task_id : (eventTaskId ?? null),
-        messageMeta,
-        details,
-        timestamp,
-        eventOrder,
-        isCurrentTask ? currentTaskNodeDispatchConfig : subTaskNodeDispatchConfig
-      )
-    }
+    processTaskEvents({
+      taskEvents,
+      rootTaskId: task.task_id,
+      getCachedMaaMessageMeta: (message) => this.getCachedMaaMessageMeta(message),
+      taskLifecycleMetaContext,
+      handleScopedNodeEvent,
+      currentTaskNodeDispatchConfig,
+      subTaskNodeDispatchConfig,
+    })
 
     return nodes
   }
