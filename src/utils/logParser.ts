@@ -83,6 +83,7 @@ import {
   setTaskNextList,
   type TaskScopedNodeAggregation,
 } from './logParserTaskScopedAggregationHelpers'
+import { createTaskStackTracker } from './logParserTaskStackHelpers'
 
 export interface ParseProgress {
   current: number
@@ -661,7 +662,7 @@ export class LogParser {
     const subTaskSnapshots = new Map<number, SubTaskSnapshot>()
     const subTaskParentByTaskId = new Map<number, number>()
     let syntheticSubTaskPipelineNodeId = -1
-    const activeTaskStack: number[] = [task.task_id]
+    const taskStackTracker = createTaskStackTracker(task.task_id)
     const activeRecognitionAttempts = new Map<string, RecognitionAttempt>()
     const activeRecognitionStack: Array<{ taskId: number; recoId: number }> = []
     const finishedRecognitionKeys = new Set<string>()
@@ -681,29 +682,6 @@ export class LogParser {
       const normalized = value.includes(' ') ? value.replace(' ', 'T') : value
       const parsed = Date.parse(normalized)
       return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY
-    }
-    const removeFromActiveTaskStack = (taskId: number) => {
-      for (let i = activeTaskStack.length - 1; i >= 0; i--) {
-        if (activeTaskStack[i] === taskId) {
-          activeTaskStack.splice(i, 1)
-          return
-        }
-      }
-    }
-    const pushActiveTask = (taskId: number) => {
-      removeFromActiveTaskStack(taskId)
-      activeTaskStack.push(taskId)
-    }
-    const peekActiveTask = (): number => {
-      return activeTaskStack.length > 0
-        ? activeTaskStack[activeTaskStack.length - 1]
-        : task.task_id
-    }
-    const popActiveTask = (taskId: number) => {
-      removeFromActiveTaskStack(taskId)
-      if (activeTaskStack.length === 0) {
-        activeTaskStack.push(task.task_id)
-      }
     }
     const withActionTimestamps = (
       actionDetails: any,
@@ -1604,8 +1582,7 @@ export class LogParser {
       activeSubTaskActionNodes.clear()
       subTasks.clear()
       subTaskParentByTaskId.clear()
-      activeTaskStack.length = 0
-      activeTaskStack.push(task.task_id)
+      taskStackTracker.reset()
     }
     const settleCurrentNodeRuntimeStates = (
       fallbackStatus: 'success' | 'failed',
@@ -2319,9 +2296,9 @@ export class LogParser {
     }
     const taskLifecycleMetaContext: TaskLifecycleMetaEventContext = {
       rootTaskId: task.task_id,
-      peekActiveTask,
-      pushActiveTask,
-      popActiveTask,
+      peekActiveTask: () => taskStackTracker.peek(),
+      pushActiveTask: (taskId) => taskStackTracker.push(taskId),
+      popActiveTask: (taskId) => taskStackTracker.pop(taskId),
       setSubTaskParent: (subTaskId: number, parentTaskId: number) => {
         subTaskParentByTaskId.set(subTaskId, parentTaskId)
       },
