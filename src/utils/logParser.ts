@@ -93,6 +93,10 @@ import {
   clearSubTaskRuntimeStateAfterPipelineFinalize,
   consumeMatchedSubTaskAction,
 } from './logParser/subTaskRuntimeCleanupHelpers'
+import {
+  startCurrentPipelineNodeEvent as startCurrentPipelineNodeEventHelper,
+  startSubTaskPipelineNodeEvent as startSubTaskPipelineNodeEventHelper,
+} from './logParser/pipelineNodeStartHelpers'
 import { settleCurrentNodeRuntimeStates as settleCurrentNodeRuntimeStatesHelper } from './logParser/runtimeSettlementHelpers'
 import {
   createScopedPipelineNodeFinalizeHandler,
@@ -1420,37 +1424,19 @@ export class LogParser {
       details: Record<string, any>,
       timestamp: string
     ) => {
-      const nodeId = readNumberField(details, 'node_id')
-      if (nodeId == null) return
-      const startTimestamp = this.stringPool.intern(timestamp)
-      pipelineNodeStartTimes.set(nodeId, startTimestamp)
-      activePipelineNodeId = nodeId
-      resetCurrentNodeAggregation()
-
-      let activeNode = pipelineNodesById.get(nodeId)
-      if (!activeNode) {
-        activeNode = {
-          node_id: nodeId,
-          name: this.stringPool.intern(details.name || ''),
-          ts: startTimestamp,
-          end_ts: startTimestamp,
-          status: 'running',
-          task_id: task.task_id,
-          reco_details: details.reco_details ? markRaw(details.reco_details) : undefined,
-          action_details: withTimestamps(details.action_details, undefined, undefined, startTimestamp),
-          focus: resolveEventFocus(details),
-          next_list: [],
-          node_details: details.node_details ? markRaw(details.node_details) : undefined,
-        }
-        nodes.push(activeNode)
-        pipelineNodesById.set(nodeId, activeNode)
-      } else if (activeNode.status === 'running') {
-        activeNode.name = this.stringPool.intern(details.name || activeNode.name || '')
-        activeNode.ts = startTimestamp
-        activeNode.end_ts = startTimestamp
-        activeNode.task_id = task.task_id
-        activeNode.focus = resolveEventFocus(details, activeNode.focus)
-      }
+      const startedNodeId = startCurrentPipelineNodeEventHelper({
+        details,
+        timestamp,
+        rootTaskId: task.task_id,
+        nodes,
+        pipelineNodesById,
+        resetCurrentNodeAggregation,
+        withTimestamps,
+        intern: (value) => this.stringPool.intern(value),
+      })
+      if (startedNodeId == null) return
+      pipelineNodeStartTimes.set(startedNodeId, this.stringPool.intern(timestamp))
+      activePipelineNodeId = startedNodeId
       refreshActivePipelineNodePreview(timestamp)
     }
     const startSubTaskPipelineNodeEvent: ScopedPipelineNodeStartingHandler = (
@@ -1458,13 +1444,15 @@ export class LogParser {
       details: Record<string, any>,
       timestamp: string
     ) => {
-      if (subTaskId != null) {
-        resetTaskNodeAggregation(taskScopedNodeAggregationByTaskId, subTaskId)
-        const nodeId = readNumberField(details, 'node_id')
-        if (nodeId != null) {
-          subTaskPipelineNodeStartTimes.set(scopedKey(subTaskId, nodeId), this.stringPool.intern(timestamp))
-        }
-      }
+      startSubTaskPipelineNodeEventHelper({
+        subTaskId,
+        details,
+        timestamp,
+        scopedKey,
+        taskScopedNodeAggregationByTaskId,
+        subTaskPipelineNodeStartTimes,
+        intern: (value) => this.stringPool.intern(value),
+      })
       refreshActivePipelineNodePreview(timestamp)
     }
     const handleScopedNodeEvent = (
