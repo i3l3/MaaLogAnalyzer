@@ -16,6 +16,7 @@ const createNavItem = (node: NodeInfo, originalIndex: number): NodeNavViewItem =
   node,
   originalIndex,
   primaryText: node.name,
+  navStatus: node.status,
   matchDetails: [],
   matchKinds: [],
   matchHint: '',

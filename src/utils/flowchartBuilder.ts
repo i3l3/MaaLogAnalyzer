@@ -2,6 +2,10 @@ import type { Node, Edge } from '@vue-flow/core'
 import ELK from 'elkjs/lib/elk.bundled.js'
 import type { TaskInfo, NodeInfo } from '../types'
 import { sortNodesByGlobalExecutionOrder } from './taskExecutionOrder'
+import {
+  resolveNodeExecutionName,
+  resolveNodeMatchedNextListItem,
+} from './nodeExecutionName'
 
 export interface FlowNodeData {
   label: string
@@ -15,6 +19,7 @@ export interface FlowEdgeData {
   anchor: boolean
   jump_back: boolean
   edgeStatus: 'success' | 'failed' | 'running' | 'topology'
+  transitionType?: 'topology' | 'next' | 'jump-back' | 'on-error' | 'jump-back-return'
   flowMode?: 'none' | 'chevron' | 'dash'
   routePoints?: Array<{ x: number; y: number }>
 }
@@ -47,16 +52,21 @@ export interface BuildFlowchartOptions {
 
 export async function buildFlowchartData(task: TaskInfo, options: BuildFlowchartOptions = {}): Promise<{ nodes: Node[]; edges: Edge[] }> {
   const orderedNodes = sortNodesByGlobalExecutionOrder(task.nodes)
+  const orderedExecutions = orderedNodes.map((node) => ({
+    node,
+    executionName: resolveNodeExecutionName(node),
+    matchedNext: resolveNodeMatchedNextListItem(node),
+  }))
 
   // 1. Collect executed node names with order and info
   const executedNodeMap = new Map<string, { order: number[]; infos: NodeInfo[] }>()
-  orderedNodes.forEach((node, index) => {
-    const existing = executedNodeMap.get(node.name)
+  orderedExecutions.forEach(({ node, executionName }, index) => {
+    const existing = executedNodeMap.get(executionName)
     if (existing) {
       existing.order.push(index + 1)
       existing.infos.push(node)
     } else {
-      executedNodeMap.set(node.name, { order: [index + 1], infos: [node] })
+      executedNodeMap.set(executionName, { order: [index + 1], infos: [node] })
     }
   })
 
@@ -66,6 +76,7 @@ export async function buildFlowchartData(task: TaskInfo, options: BuildFlowchart
   const allNodeNames = new Set<string>(executedNodeMap.keys())
   if (!ignoreUnexecutedNodes) {
     task.nodes.forEach(node => {
+      allNodeNames.add(node.name)
       node.next_list.forEach(next => {
         allNodeNames.add(next.name)
       })
@@ -104,6 +115,51 @@ export async function buildFlowchartData(task: TaskInfo, options: BuildFlowchart
   const flowEdgeById = new Map<string, Edge>()
   const edgeSet = new Set<string>()
 
+  const toEdgeStatus = (status: NodeInfo['status']): FlowEdgeData['edgeStatus'] => {
+    return status === 'failed'
+      ? 'failed'
+      : status === 'running'
+        ? 'running'
+        : 'success'
+  }
+
+  const upsertExecutedEdge = (
+    source: string,
+    target: string,
+    toNodeStatus: FlowEdgeData['edgeStatus'],
+    transitionType: Exclude<NonNullable<FlowEdgeData['transitionType']>, 'topology'>,
+  ) => {
+    if (!source || !target || source === target) return
+
+    const edgeId = `${source}->${target}`
+    const existing = flowEdgeById.get(edgeId)
+
+    if (existing) {
+      existing.data = {
+        ...(existing.data as FlowEdgeData),
+        executed: true,
+        edgeStatus: toNodeStatus,
+        transitionType,
+      }
+      return
+    }
+
+    const flowEdge: Edge = {
+      id: edgeId,
+      source,
+      target,
+      data: {
+        executed: true,
+        anchor: false,
+        jump_back: false,
+        edgeStatus: toNodeStatus,
+        transitionType,
+      } satisfies FlowEdgeData,
+    }
+    flowEdges.push(flowEdge)
+    flowEdgeById.set(edgeId, flowEdge)
+  }
+
   // Topology edges from next_list
   task.nodes.forEach(node => {
     node.next_list.forEach(next => {
@@ -121,6 +177,7 @@ export async function buildFlowchartData(task: TaskInfo, options: BuildFlowchart
           anchor: next.anchor,
           jump_back: next.jump_back,
           edgeStatus: 'topology',
+          transitionType: 'topology',
         } satisfies FlowEdgeData,
       }
       flowEdges.push(flowEdge)
@@ -129,41 +186,53 @@ export async function buildFlowchartData(task: TaskInfo, options: BuildFlowchart
   })
 
   // Execution edges: consecutive nodes
-  for (let i = 0; i < orderedNodes.length - 1; i++) {
-    const from = orderedNodes[i].name
-    const to = orderedNodes[i + 1].name
-    const edgeId = `${from}->${to}`
+  const jumpbackStack: string[] = []
 
-    const existing = flowEdgeById.get(edgeId)
-    const toNodeStatus: FlowEdgeData['edgeStatus'] = orderedNodes[i + 1].status === 'failed'
-      ? 'failed'
-      : orderedNodes[i + 1].status === 'running'
-        ? 'running'
-        : 'success'
+  for (let i = 0; i < orderedExecutions.length - 1; i++) {
+    const current = orderedExecutions[i]
+    const nextExecution = orderedExecutions[i + 1]
 
-    if (existing) {
-      // Mark topology edge as executed
-      existing.data = {
-        ...existing.data,
-        executed: true,
-        edgeStatus: toNodeStatus,
-      }
-    } else {
-      // Create new execution edge (not in topology)
-      const flowEdge: Edge = {
-        id: edgeId,
-        source: from,
-        target: to,
-        data: {
-          executed: true,
-          anchor: false,
-          jump_back: false,
-          edgeStatus: toNodeStatus,
-        } satisfies FlowEdgeData,
-      }
-      flowEdges.push(flowEdge)
-      flowEdgeById.set(edgeId, flowEdge)
+    const currentParentName = current.node.name
+    const currentIsFailed = current.node.status === 'failed'
+    const currentIsJumpBackHit =
+      !currentIsFailed &&
+      current.matchedNext?.nextItem.jump_back === true &&
+      !!currentParentName
+
+    if (currentIsJumpBackHit) {
+      jumpbackStack.push(currentParentName)
     }
+
+    const stackTop = jumpbackStack.length > 0 ? jumpbackStack[jumpbackStack.length - 1] : undefined
+    const returnedToJumpPoint =
+      !currentIsFailed &&
+      !!stackTop &&
+      nextExecution.node.name === stackTop &&
+      allNodeNames.has(stackTop)
+
+    const toNodeStatus = toEdgeStatus(nextExecution.node.status)
+
+    if (returnedToJumpPoint) {
+      // Last node in jump_back path returns to the jump point.
+      upsertExecutedEdge(current.executionName, stackTop, toNodeStatus, 'jump-back-return')
+
+      // Then parent context continues from its own next-list hit.
+      const reenterTransitionType = nextExecution.matchedNext?.nextItem.jump_back === true
+        ? 'jump-back'
+        : 'next'
+      upsertExecutedEdge(stackTop, nextExecution.executionName, toNodeStatus, reenterTransitionType)
+
+      jumpbackStack.pop()
+      continue
+    }
+
+    const transitionType = currentIsFailed
+      ? 'on-error'
+      : currentIsJumpBackHit
+        ? 'jump-back'
+        : 'next'
+
+    upsertExecutedEdge(current.executionName, nextExecution.executionName, toNodeStatus, transitionType)
   }
 
   // 5. ELK layout (layout calculation only)

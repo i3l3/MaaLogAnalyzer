@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { ref, computed, onBeforeUnmount, watch } from 'vue'
 import { VueFlow, useVueFlow } from '@vue-flow/core'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -109,6 +109,7 @@ const {
   selectedTimelineIndex,
   showNavDrawer,
   executionTimeline,
+  timelineNavItems,
   getTimelineDotClass,
   selectedFlowNodeId,
   scrollNavToIndex,
@@ -152,6 +153,19 @@ const {
   closePopover,
   scrollNavToIndex,
 })
+
+const handleSelectTimelineItem = (index: number) => {
+  selectTimelineItem(index, timelineNavItems.value[index]?.focusNodeId)
+}
+
+watch(
+  [selectedTimelineIndex, timelineNavItems],
+  () => {
+    const index = selectedTimelineIndex.value
+    if (index == null) return
+    focusedNodeId.value = timelineNavItems.value[index]?.focusNodeId ?? executionTimeline.value[index]?.name ?? null
+  }
+)
 
 // 预计算 node_id → 截图 URL 映射（每个执行独立匹配）
 const nodeImageMap = computed(() => {
@@ -235,10 +249,10 @@ const { onNodeClick, onPaneClick } = useFlowchartNodeInteraction({
         </div>
         <n-scrollbar style="flex: 1">
           <flowchart-timeline-nav-list
-            :items="executionTimeline"
+            :items="timelineNavItems"
             :selected-index="selectedTimelineIndex"
             :get-dot-class="getTimelineDotClass"
-            @select="selectTimelineItem"
+            @select="handleSelectTimelineItem"
           />
         </n-scrollbar>
       </div>
@@ -271,7 +285,7 @@ const { onNodeClick, onPaneClick } = useFlowchartNodeInteraction({
           <template #node-flowchartNode="nodeProps">
             <FlowchartNode
               :data="nodeProps.data"
-              :selected="nodeProps.id === selectedFlowNodeId"
+              :selected="nodeProps.id === (focusedNodeId ?? selectedFlowNodeId)"
               :is-start="nodeProps.id === executionTimeline[0]?.name"
               :dimmed="highlightedNodeIds != null && !highlightedNodeIds.has(nodeProps.id)"
             />
@@ -302,10 +316,10 @@ const { onNodeClick, onPaneClick } = useFlowchartNodeInteraction({
       >
         <n-drawer-content title="执行顺序">
           <flowchart-timeline-nav-list
-            :items="executionTimeline"
+            :items="timelineNavItems"
             :selected-index="selectedTimelineIndex"
             :get-dot-class="getTimelineDotClass"
-            @select="selectTimelineItem"
+            @select="handleSelectTimelineItem"
           />
         </n-drawer-content>
       </n-drawer>

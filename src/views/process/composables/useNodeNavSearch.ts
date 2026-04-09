@@ -10,11 +10,16 @@ import {
   formatNodeNavMatchHint,
   formatNodeNavMatchPreview,
 } from './nodeNavSearch/format'
-import type { NodeNavViewItem } from './nodeNavSearch/types'
+import { buildNodeExecutionTimeline } from '../../../utils/nodeExecutionTimeline'
+import type {
+  NodeNavStatus,
+  NodeNavViewItem,
+} from './nodeNavSearch/types'
 
 export type {
   NodeNavMatchDetail,
   NodeNavMatchKind,
+  NodeNavStatus,
   NodeNavViewItem,
 } from './nodeNavSearch/types'
 
@@ -25,47 +30,7 @@ type SourceEntry = {
   originalIndex: number
   primaryText: string
   primaryMatchKind: 'node' | 'next-list'
-}
-
-const normalizeOptionalName = (value: unknown): string | undefined => {
-  if (typeof value !== 'string') return undefined
-  const trimmed = value.trim()
-  return trimmed || undefined
-}
-
-const resolveNodeNextListHitName = (node: NodeInfo): string | undefined => {
-  const nextNames = new Set((node.next_list || []).map((item) => item.name).filter((name) => !!name))
-  if (nextNames.size === 0) return undefined
-
-  const candidates: string[] = []
-  const pushCandidate = (value: unknown) => {
-    const normalized = normalizeOptionalName(value)
-    if (!normalized) return
-    candidates.push(normalized)
-  }
-
-  pushCandidate(node.node_details?.name)
-  pushCandidate(node.action_details?.name)
-  pushCandidate(node.reco_details?.name)
-
-  for (const flowItem of (node.node_flow || [])) {
-    if (flowItem.status !== 'success') continue
-    pushCandidate(flowItem.name)
-    if (flowItem.type === 'recognition') {
-      pushCandidate(flowItem.reco_details?.name)
-    }
-    if (flowItem.type === 'action') {
-      pushCandidate(flowItem.action_details?.name)
-    }
-  }
-
-  pushCandidate(node.name)
-
-  for (const candidate of candidates) {
-    if (nextNames.has(candidate)) return candidate
-  }
-
-  return undefined
+  navStatus: NodeNavStatus
 }
 
 export const useNodeNavSearch = (
@@ -74,8 +39,8 @@ export const useNodeNavSearch = (
 ) => {
   const nodeNavSearchText = ref('')
   const normalizedNodeNavSearchText = computed(() => normalizeSearchText(nodeNavSearchText.value))
-  const nodeNavFailedOnly = ref(false)
   const nodeNavMode = ref<NodeNavMode>('pipeline')
+  const nodeNavFailedOnly = ref(false)
 
   const rootTaskEntries = computed(() => {
     const entries = currentNodes.value.map((node, originalIndex) => ({ node, originalIndex }))
@@ -90,28 +55,27 @@ export const useNodeNavSearch = (
       originalIndex,
       primaryText: node.name || '未命名节点',
       primaryMatchKind: 'node',
+      navStatus: node.status,
     }))
   })
 
-  const nextListHitEntries = computed<SourceEntry[]>(() => {
-    const result: SourceEntry[] = []
-    for (const entry of rootTaskEntries.value) {
-      const hitName = resolveNodeNextListHitName(entry.node)
-      if (!hitName) continue
-      result.push({
-        node: entry.node,
-        originalIndex: entry.originalIndex,
-        primaryText: hitName,
-        primaryMatchKind: 'next-list',
-      })
-    }
-    return result
+  const recognitionEntries = computed<SourceEntry[]>(() => {
+    const timelineItems = buildNodeExecutionTimeline(currentNodes.value, {
+      rootTaskId: selectedRootTaskId.value,
+    })
+    return timelineItems.map((item) => ({
+      node: item.nodeInfo,
+      originalIndex: item.originalIndex,
+      primaryText: item.navName,
+      primaryMatchKind: item.matchedRecognitionName ? 'next-list' : 'node',
+      navStatus: item.navStatus,
+    }))
   })
 
   const sourceEntries = computed<SourceEntry[]>(() => {
     return nodeNavMode.value === 'pipeline'
       ? pipelineEntries.value
-      : nextListHitEntries.value
+      : recognitionEntries.value
   })
 
   const appendPrimaryMatches = (entry: SourceEntry, query: string) => {
@@ -137,6 +101,7 @@ export const useNodeNavSearch = (
         node: entry.node,
         originalIndex: entry.originalIndex,
         primaryText: entry.primaryText,
+        navStatus: entry.navStatus,
         matchDetails: appendPrimaryMatches(entry, query),
       }))
       .map((item) => {
@@ -148,7 +113,13 @@ export const useNodeNavSearch = (
           matchPreview: formatNodeNavMatchPreview(item.matchDetails),
         }
       })
-        .filter((item) => nodeNavMode.value !== 'pipeline' || !nodeNavFailedOnly.value || item.node.status === 'failed')
+      .filter((item) => {
+        if (!nodeNavFailedOnly.value) return true
+        if (nodeNavMode.value === 'pipeline') {
+          return item.navStatus === 'failed'
+        }
+        return item.navStatus === 'failed' || item.navStatus === 'timeout' || item.navStatus === 'action-failed'
+      })
       .filter((item) => !query || item.matchDetails.length > 0)
   })
 
@@ -156,10 +127,12 @@ export const useNodeNavSearch = (
     if (currentNodes.value.length === 0) return '暂无节点数据'
     if (nodeNavMode.value === 'next-list-hit') {
       if (rootTaskEntries.value.length === 0) return '暂无根层节点数据'
-      if (nextListHitEntries.value.length === 0) return '暂无 NextList 命中节点'
+      if (recognitionEntries.value.length === 0) return '暂无识别模式节点'
     }
     if (normalizedNodeNavSearchText.value) return '未找到匹配节点'
-    if (nodeNavFailedOnly.value) return '暂无失败节点'
+    if (nodeNavFailedOnly.value) {
+      return nodeNavMode.value === 'pipeline' ? '暂无失败节点' : '暂无异常状态节点'
+    }
     return '暂无节点数据'
   })
 

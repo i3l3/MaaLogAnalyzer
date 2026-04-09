@@ -1,6 +1,9 @@
 import { computed, nextTick, ref, type Ref } from 'vue'
 import type { NodeInfo, TaskInfo } from '../../../types'
-import { sortNodesByGlobalExecutionOrder } from '../../../utils/taskExecutionOrder'
+import {
+  buildNodeExecutionTimeline,
+  type NodeExecutionNavStatus,
+} from '../../../utils/nodeExecutionTimeline'
 
 interface UseFlowchartTimelineOptions {
   selectedTask: Ref<TaskInfo | null>
@@ -12,27 +15,58 @@ interface TimelineItem {
   status: NodeInfo['status']
   ts: string
   nodeInfo: NodeInfo
+  focusNodeId: string
+}
+
+export type FlowchartTimelineNavStatus = NodeExecutionNavStatus
+
+interface TimelineNavItem {
+  index: number
+  name: string
+  status: FlowchartTimelineNavStatus
+  focusNodeId: string
+  ts: string
+  nodeInfo: NodeInfo
 }
 
 export const useFlowchartTimeline = (options: UseFlowchartTimelineOptions) => {
   const selectedTimelineIndex = ref<number | null>(null)
   const showNavDrawer = ref(false)
 
-  // Execution timeline: one entry per execution in order.
-  const executionTimeline = computed<TimelineItem[]>(() => {
+  const timelineItems = computed(() => {
     const task = options.selectedTask.value
     if (!task) return []
-    const orderedNodes = sortNodesByGlobalExecutionOrder(task.nodes)
-    return orderedNodes.map((node, index) => ({
-      index,
-      name: node.name,
-      status: node.status,
-      ts: node.ts,
-      nodeInfo: node,
+    return buildNodeExecutionTimeline(task.nodes)
+  })
+
+  // Execution timeline: one entry per execution in order.
+  const executionTimeline = computed<TimelineItem[]>(() => {
+    return timelineItems.value.map((item) => ({
+      index: item.index,
+      name: item.executionName,
+      status: item.nodeInfo.status,
+      ts: item.ts,
+      nodeInfo: item.nodeInfo,
+      focusNodeId: item.focusNodeId,
     }))
   })
 
-  const getTimelineDotClass = (status: NodeInfo['status']) => {
+  const timelineNavItems = computed<TimelineNavItem[]>(() => {
+    return timelineItems.value.map((item) => {
+      return {
+        index: item.index,
+        name: item.navName,
+        status: item.navStatus,
+        focusNodeId: item.focusNodeId,
+        ts: item.ts,
+        nodeInfo: item.nodeInfo,
+      }
+    })
+  })
+
+  const getTimelineDotClass = (status: FlowchartTimelineNavStatus) => {
+    if (status === 'timeout') return 'dot-timeout'
+    if (status === 'action-failed') return 'dot-action-failed'
     if (status === 'success') return 'dot-success'
     if (status === 'running') return 'dot-running'
     return 'dot-failed'
@@ -41,8 +75,8 @@ export const useFlowchartTimeline = (options: UseFlowchartTimelineOptions) => {
   // The canvas node ID that corresponds to the selected timeline item.
   const selectedFlowNodeId = computed(() => {
     if (selectedTimelineIndex.value == null) return null
-    const item = executionTimeline.value[selectedTimelineIndex.value]
-    return item?.name ?? null
+    const item = timelineNavItems.value[selectedTimelineIndex.value]
+    return item?.focusNodeId ?? null
   })
 
   const scrollNavToIndex = (index: number) => {
@@ -56,6 +90,7 @@ export const useFlowchartTimeline = (options: UseFlowchartTimelineOptions) => {
     selectedTimelineIndex,
     showNavDrawer,
     executionTimeline,
+    timelineNavItems,
     getTimelineDotClass,
     selectedFlowNodeId,
     scrollNavToIndex,

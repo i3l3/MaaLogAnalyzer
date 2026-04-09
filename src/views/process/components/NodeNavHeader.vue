@@ -34,14 +34,15 @@ const emit = defineEmits<{
         @update:value="(value) => emit('update:mode', value as NodeNavMode)"
       >
         <n-radio-button value="pipeline" title="按 Pipeline 节点列表显示">全部</n-radio-button>
-        <n-radio-button value="next-list-hit" title="按根层 NextList 命中节点显示">命中</n-radio-button>
+        <n-radio-button value="next-list-hit" title="按根层识别执行顺序显示">识别</n-radio-button>
       </n-radio-group>
       <n-button
-        v-if="mode === 'pipeline'"
         text
         size="tiny"
         @click="emit('toggle-failed-only')"
-        :title="failedOnly ? '仅显示失败节点（点击显示全部）' : '显示全部节点（点击仅失败）'"
+        :title="failedOnly
+          ? (mode === 'pipeline' ? '仅显示失败节点（点击显示全部）' : '仅显示异常状态节点（点击显示全部）')
+          : (mode === 'pipeline' ? '显示全部节点（点击仅失败）' : '显示全部节点（点击仅异常状态）')"
       >
         <span class="node-nav-filter-dot" :class="{ 'node-nav-filter-dot--active': failedOnly }" />
       </n-button>

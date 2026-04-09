@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import type { NodeInfo } from '../../../types'
+import type { FlowchartTimelineNavStatus } from '../composables/useFlowchartTimeline'
 
 interface TimelineItem {
   name: string
-  status: NodeInfo['status']
+  status: FlowchartTimelineNavStatus
 }
 
 defineProps<{
   items: TimelineItem[]
   selectedIndex: number | null
-  getDotClass: (status: NodeInfo['status']) => string
+  getDotClass: (status: FlowchartTimelineNavStatus) => string
 }>()
 
 const emit = defineEmits<{
@@ -90,5 +90,14 @@ const emit = defineEmits<{
 
 .nav-status-dot.dot-failed {
   background: #d03050;
+}
+
+.nav-status-dot.dot-timeout {
+  background: #f0a020;
+}
+
+.nav-status-dot.dot-action-failed {
+  background: #d03050;
+  box-shadow: 0 0 0 1px rgba(208, 48, 80, 0.25);
 }
 </style>

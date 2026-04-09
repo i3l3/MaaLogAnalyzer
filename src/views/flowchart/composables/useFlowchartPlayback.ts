@@ -2,6 +2,7 @@ import { ref, type Ref } from 'vue'
 
 interface TimelineItem {
   name: string
+  focusNodeId?: string
 }
 
 interface UseFlowchartPlaybackOptions {
@@ -37,16 +38,19 @@ export const useFlowchartPlayback = (options: UseFlowchartPlaybackOptions) => {
 
   const focusTimelineItem = (
     index: number,
-    focusOptions?: { openPopover?: boolean; center?: boolean; closeDrawer?: boolean },
+    focusOptions?: { openPopover?: boolean; center?: boolean; closeDrawer?: boolean; focusNodeId?: string },
   ) => {
     const item = options.executionTimeline.value[index]
     if (!item) return
+    const requestedFocusNodeId = focusOptions?.focusNodeId ?? item.focusNodeId ?? item.name
+    const requestedFlowNode = options.getNodeById(requestedFocusNodeId)
+    const focusNodeId = requestedFlowNode ? requestedFocusNodeId : item.name
+    const flowNode = requestedFlowNode ?? options.getNodeById(item.name)
 
     options.selectedTimelineIndex.value = index
-    options.focusedNodeId.value = item.name
+    options.focusedNodeId.value = focusNodeId
 
     if (focusOptions?.center !== false) {
-      const flowNode = options.getNodeById(item.name)
       if (flowNode) {
         options.centerOnNode(flowNode.position.x + 90, flowNode.position.y + 30, {
           zoom: options.focusZoom.value,
@@ -56,7 +60,7 @@ export const useFlowchartPlayback = (options: UseFlowchartPlaybackOptions) => {
     }
 
     if (focusOptions?.openPopover) {
-      options.popoverNodeId.value = item.name
+      options.popoverNodeId.value = focusNodeId
       setTimeout(() => {
         options.updatePopoverPosition()
         requestAnimationFrame(options.updatePopoverPosition)
@@ -101,9 +105,9 @@ export const useFlowchartPlayback = (options: UseFlowchartPlaybackOptions) => {
   }
 
   // Select a timeline item: center canvas + open popover.
-  const selectTimelineItem = (index: number) => {
+  const selectTimelineItem = (index: number, focusNodeId?: string) => {
     stopPlayback()
-    focusTimelineItem(index, { openPopover: true, center: true })
+    focusTimelineItem(index, { openPopover: true, center: true, focusNodeId })
   }
 
   return {

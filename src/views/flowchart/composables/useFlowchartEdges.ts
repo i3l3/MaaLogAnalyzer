@@ -25,6 +25,40 @@ export const useFlowchartEdges = (options: UseFlowchartEdgesOptions) => {
       return style
     }
 
+    const transitionType = edgeData.transitionType
+    if (transitionType === 'next') {
+      return {
+        stroke: '#18a058',
+        strokeWidth: 3,
+        opacity: 1,
+        strokeDasharray: '7 4',
+      }
+    }
+    if (transitionType === 'jump-back') {
+      return {
+        stroke: '#f0a020',
+        strokeWidth: 3,
+        opacity: 1,
+        strokeDasharray: '10 5',
+      }
+    }
+    if (transitionType === 'jump-back-return') {
+      return {
+        stroke: '#f0a020',
+        strokeWidth: 3,
+        opacity: 1,
+        strokeDasharray: '2 6',
+      }
+    }
+    if (transitionType === 'on-error') {
+      return {
+        stroke: '#d03050',
+        strokeWidth: 3,
+        opacity: 1,
+        strokeDasharray: '7 4',
+      }
+    }
+
     const color = edgeData.edgeStatus === 'failed'
       ? '#d03050'
       : edgeData.edgeStatus === 'running'

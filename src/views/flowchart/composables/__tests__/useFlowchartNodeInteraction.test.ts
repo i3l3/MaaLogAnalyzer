@@ -101,4 +101,44 @@ describe('useFlowchartNodeInteraction', () => {
 
     expect(selectedTimelineIndex.value).toBe(2)
   })
+
+  it('still focuses non-executed nodes without opening popover', () => {
+    const executionTimeline = ref([
+      { name: 'NodeA' },
+      { name: 'NodeB' },
+    ])
+    const selectedTimelineIndex = ref<number | null>(1)
+    const popoverNodeId = ref<string | null>('NodeB')
+    const focusedNodeId = ref<string | null>('NodeB')
+    const stopPlayback = vi.fn()
+    const closePopover = vi.fn()
+    const updatePopoverPosition = vi.fn()
+    const scrollNavToIndex = vi.fn()
+
+    const interaction = useFlowchartNodeInteraction({
+      executionTimeline,
+      popoverNodeId,
+      focusedNodeId,
+      selectedTimelineIndex,
+      stopPlayback,
+      closePopover,
+      updatePopoverPosition,
+      scrollNavToIndex,
+    })
+
+    interaction.onNodeClick({
+      node: {
+        id: 'JumpBackTarget',
+        data: makeNodeData({ executionOrder: [], nodeInfoCount: 0 }),
+      },
+    })
+
+    expect(stopPlayback).toHaveBeenCalledTimes(1)
+    expect(focusedNodeId.value).toBe('JumpBackTarget')
+    expect(popoverNodeId.value).toBe(null)
+    expect(closePopover).toHaveBeenCalledTimes(1)
+    expect(selectedTimelineIndex.value).toBe(null)
+    expect(scrollNavToIndex).not.toHaveBeenCalled()
+    expect(updatePopoverPosition).not.toHaveBeenCalled()
+  })
 })

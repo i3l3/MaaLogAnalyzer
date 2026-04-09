@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NFlex, NText, NTag } from 'naive-ui'
-import type { NodeInfo } from '../../../types'
-import type { NodeNavMode, NodeNavViewItem } from '../composables/useNodeNavSearch'
+import type {
+  NodeNavMode,
+  NodeNavStatus,
+  NodeNavViewItem,
+} from '../composables/useNodeNavSearch'
 import { extractTime } from '../../../utils/formatDuration'
 import { getRuntimeStatusTagType, getRuntimeStatusText } from '../../../utils/runtimeStatus'
 
@@ -17,10 +20,24 @@ const showMatchDetails = computed(() => {
   return !!props.normalizedSearchText && props.item.matchDetails.length > 0
 })
 
-const getNodeNavDotClass = (status: NodeInfo['status']) => {
+const getNodeNavDotClass = (status: NodeNavStatus) => {
+  if (status === 'timeout') return 'nav-dot-timeout'
+  if (status === 'action-failed') return 'nav-dot-action-failed'
   if (status === 'success') return 'nav-dot-success'
   if (status === 'running') return 'nav-dot-running'
   return 'nav-dot-failed'
+}
+
+const getNodeNavStatusText = (status: NodeNavStatus): string => {
+  if (status === 'timeout') return '识别超时'
+  if (status === 'action-failed') return '动作失败'
+  return getRuntimeStatusText(status)
+}
+
+const getNodeNavStatusTagType = (status: NodeNavStatus) => {
+  if (status === 'timeout') return 'warning' as const
+  if (status === 'action-failed') return 'error' as const
+  return getRuntimeStatusTagType(status)
 }
 </script>
 
@@ -33,8 +50,8 @@ const getNodeNavDotClass = (status: NodeInfo['status']) => {
       </n-text>
     </n-flex>
     <n-flex align="center" style="gap: 8px">
-      <n-tag v-if="mode === 'pipeline'" size="small" :type="getRuntimeStatusTagType(item.node.status)">
-        {{ getRuntimeStatusText(item.node.status) }}
+      <n-tag size="small" :type="getNodeNavStatusTagType(item.navStatus)">
+        {{ getNodeNavStatusText(item.navStatus) }}
       </n-tag>
       <n-tag
         v-if="showMatchDetails"
@@ -58,7 +75,7 @@ const getNodeNavDotClass = (status: NodeInfo['status']) => {
 
   <n-flex v-else vertical :style="{ gap: displayMode === 'compact' ? '2px' : '2px' }">
     <n-flex align="center" :style="{ gap: displayMode === 'compact' ? '6px' : '4px' }">
-      <span v-if="mode === 'pipeline'" class="nav-status-dot" :class="getNodeNavDotClass(item.node.status)" />
+      <span class="nav-status-dot" :class="getNodeNavDotClass(item.navStatus)" />
       <n-text style="font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
         {{ item.primaryText || '未命名节点' }}
       </n-text>
@@ -100,6 +117,15 @@ const getNodeNavDotClass = (status: NodeInfo['status']) => {
 
 .nav-dot-failed {
   background: #d03050;
+}
+
+.nav-dot-timeout {
+  background: #f0a020;
+}
+
+.nav-dot-action-failed {
+  background: #d03050;
+  box-shadow: 0 0 0 1px rgba(208, 48, 80, 0.25);
 }
 
 .node-nav-match-preview {

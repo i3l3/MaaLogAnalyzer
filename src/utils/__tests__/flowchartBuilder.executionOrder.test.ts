@@ -64,8 +64,10 @@ describe('buildFlowchartData execution order', () => {
     const edgeBC = edges.find((edge) => edge.id === 'NodeB->NodeC')
     expect(edgeAB?.data.executed).toBe(true)
     expect(edgeAB?.data.edgeStatus).toBe('running')
+    expect(edgeAB?.data.transitionType).toBe('next')
     expect(edgeBC?.data.executed).toBe(true)
     expect(edgeBC?.data.edgeStatus).toBe('failed')
+    expect(edgeBC?.data.transitionType).toBe('next')
   })
 
   it('keeps repeated node execution order aligned to sorted timeline', async () => {
@@ -93,5 +95,167 @@ describe('buildFlowchartData execution order', () => {
 
     expect(nodeA?.data.executionOrder).toEqual([1, 3])
     expect(nodeB?.data.executionOrder).toEqual([2])
+  })
+
+  it('marks matched recognition target as executed node instead of raw pipeline card name', async () => {
+    const task = makeTask([
+      {
+        ...makeNode({
+          nodeId: 21,
+          name: 'CCFlagInCombatMain',
+          ts: '2026-04-07 10:00:00.100',
+          status: 'success',
+          nextList: [{ name: 'CCCombatEnd', anchor: false, jump_back: false }],
+        }),
+        node_flow: [
+          {
+            id: 'node.recognition.0',
+            type: 'recognition',
+            name: 'CCCombatEnd',
+            status: 'success',
+            ts: '2026-04-07 10:00:00.120',
+          },
+        ],
+      },
+    ])
+
+    const { nodes } = await buildFlowchartData(task)
+
+    const hitNode = nodes.find((node) => node.id === 'CCCombatEnd')
+    expect(hitNode?.data.executionOrder).toEqual([1])
+
+    const rawPipelineNode = nodes.find((node) => node.id === 'CCFlagInCombatMain')
+    expect(rawPipelineNode?.data.executionOrder ?? []).toEqual([])
+  })
+
+  it('does not connect consecutive JumpBack hits directly when they come from the same parent pipeline node', async () => {
+    const task = makeTask([
+      {
+        ...makeNode({
+          nodeId: 31,
+          name: 'ParentNode',
+          ts: '2026-04-07 10:00:10.100',
+          status: 'success',
+          nextList: [{ name: 'JumpA', anchor: false, jump_back: true }],
+        }),
+        node_flow: [
+          {
+            id: 'node.recognition.0',
+            type: 'recognition',
+            name: 'JumpA',
+            status: 'success',
+            ts: '2026-04-07 10:00:10.120',
+          },
+        ],
+      },
+      {
+        ...makeNode({
+          nodeId: 32,
+          name: 'ParentNode',
+          ts: '2026-04-07 10:00:10.300',
+          status: 'success',
+          nextList: [{ name: 'JumpB', anchor: false, jump_back: true }],
+        }),
+        node_flow: [
+          {
+            id: 'node.recognition.1',
+            type: 'recognition',
+            name: 'JumpB',
+            status: 'success',
+            ts: '2026-04-07 10:00:10.320',
+          },
+        ],
+      },
+    ])
+
+    const { edges } = await buildFlowchartData(task)
+
+    const directJumpBackEdge = edges.find((edge) => edge.id === 'JumpA->JumpB')
+    expect(directJumpBackEdge).toBeUndefined()
+
+    const returnEdge = edges.find((edge) => edge.id === 'JumpA->ParentNode')
+    expect(returnEdge?.data.executed).toBe(true)
+    expect(returnEdge?.data.transitionType).toBe('jump-back-return')
+
+    const parentToSecondJumpBack = edges.find((edge) => edge.id === 'ParentNode->JumpB')
+    expect(parentToSecondJumpBack?.data.executed).toBe(true)
+    expect(parentToSecondJumpBack?.data.transitionType).toBe('jump-back')
+  })
+
+  it('does not connect jump_back hit directly to later non-jump_back hit when context returns to same parent', async () => {
+    const task = makeTask([
+      {
+        ...makeNode({
+          nodeId: 41,
+          name: 'ParentNode',
+          ts: '2026-04-07 10:00:20.100',
+          status: 'success',
+          nextList: [{ name: 'JumpA', anchor: false, jump_back: true }],
+        }),
+        node_flow: [
+          {
+            id: 'node.recognition.0',
+            type: 'recognition',
+            name: 'JumpA',
+            status: 'success',
+            ts: '2026-04-07 10:00:20.120',
+          },
+        ],
+      },
+      {
+        ...makeNode({
+          nodeId: 42,
+          name: 'ParentNode',
+          ts: '2026-04-07 10:00:20.300',
+          status: 'success',
+          nextList: [{ name: 'NormalB', anchor: false, jump_back: false }],
+        }),
+        node_flow: [
+          {
+            id: 'node.recognition.1',
+            type: 'recognition',
+            name: 'NormalB',
+            status: 'success',
+            ts: '2026-04-07 10:00:20.320',
+          },
+        ],
+      },
+    ])
+
+    const { edges } = await buildFlowchartData(task)
+
+    const directEdge = edges.find((edge) => edge.id === 'JumpA->NormalB')
+    expect(directEdge).toBeUndefined()
+
+    const returnEdge = edges.find((edge) => edge.id === 'JumpA->ParentNode')
+    expect(returnEdge?.data.executed).toBe(true)
+    expect(returnEdge?.data.transitionType).toBe('jump-back-return')
+
+    const parentEdge = edges.find((edge) => edge.id === 'ParentNode->NormalB')
+    expect(parentEdge?.data.executed).toBe(true)
+    expect(parentEdge?.data.transitionType).toBe('next')
+  })
+
+  it('marks transition after failed node as on-error', async () => {
+    const task = makeTask([
+      makeNode({
+        nodeId: 51,
+        name: 'NodeFail',
+        ts: '2026-04-07 10:00:30.100',
+        status: 'failed',
+      }),
+      makeNode({
+        nodeId: 52,
+        name: 'NodeRecovery',
+        ts: '2026-04-07 10:00:30.300',
+        status: 'success',
+      }),
+    ])
+
+    const { edges } = await buildFlowchartData(task)
+
+    const edge = edges.find((item) => item.id === 'NodeFail->NodeRecovery')
+    expect(edge?.data.executed).toBe(true)
+    expect(edge?.data.transitionType).toBe('on-error')
   })
 })

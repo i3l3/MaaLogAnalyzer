@@ -45,7 +45,7 @@ export const useFlowchartNodeInteraction = (options: UseFlowchartNodeInteraction
 
   const onNodeClick = (event: { node: { id: string; data: FlowNodeData } }) => {
     const data = event.node.data
-    if (data.nodeInfos.length === 0) return
+    const hasNodeInfos = data.nodeInfos.length > 0
 
     // Toggle popover: click same node again closes it.
     options.stopPlayback()
@@ -57,19 +57,27 @@ export const useFlowchartNodeInteraction = (options: UseFlowchartNodeInteraction
     }
 
     options.focusedNodeId.value = event.node.id
-    options.popoverNodeId.value = event.node.id
-    nextTick(() => {
-      options.updatePopoverPosition()
-      // Calibrate once more after popover content is painted.
-      requestAnimationFrame(options.updatePopoverPosition)
-    })
+    if (hasNodeInfos) {
+      options.popoverNodeId.value = event.node.id
+      nextTick(() => {
+        options.updatePopoverPosition()
+        // Calibrate once more after popover content is painted.
+        requestAnimationFrame(options.updatePopoverPosition)
+      })
+    } else {
+      options.popoverNodeId.value = null
+      options.closePopover()
+    }
 
     // Bidirectional sync with timeline.
     const timelineIndex = resolveTimelineIndexForNodeClick(event.node.id, data)
     if (timelineIndex >= 0) {
       options.selectedTimelineIndex.value = timelineIndex
       options.scrollNavToIndex(timelineIndex)
+      return
     }
+
+    options.selectedTimelineIndex.value = null
   }
 
   const onPaneClick = () => {

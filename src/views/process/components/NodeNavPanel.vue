@@ -4,7 +4,10 @@ import {
   NCard, NEmpty,
 } from 'naive-ui'
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
-import type { NodeNavMode, NodeNavViewItem } from '../composables/useNodeNavSearch'
+import type {
+  NodeNavMode,
+  NodeNavViewItem,
+} from '../composables/useNodeNavSearch'
 import NodeNavItem from './NodeNavItem.vue'
 import NodeNavHeader from './NodeNavHeader.vue'
 import NodeNavSearchInput from './NodeNavSearchInput.vue'
@@ -16,8 +19,8 @@ const props = defineProps<{
   displayMode: string
   searchText: string
   normalizedSearchText: string
-  failedOnly: boolean
   mode: NodeNavMode
+  failedOnly: boolean
   emptyDescription: string
 }>()
 
