@@ -47,13 +47,20 @@ export const setupRealtimeFollowWatchers = (options: SetupRealtimeFollowWatchers
     options.scheduleFollowToLatest()
   }, { flush: 'post' })
 
-  watch(() => options.pendingScrollNodeId.value, (nodeId) => {
-    if (nodeId == null) return
-    const index = options.currentNodes.value.findIndex((node) => node.node_id === nodeId)
-    if (index < 0) return
-    nextTick(() => {
-      void options.scrollToNode(index)
+  watch(
+    [() => options.pendingScrollNodeId.value, options.currentNodes],
+    ([nodeId]) => {
+      if (nodeId == null) return
+      const index = options.currentNodes.value.findIndex((node) => node.node_id === nodeId)
+      if (index < 0) return
+
+      // Consume pending request immediately to avoid duplicate processing
+      // when currentNodes updates before the scheduled scroll runs.
       options.onScrollDone()
-    })
-  })
+      nextTick(() => {
+        void options.scrollToNode(index)
+      })
+    },
+    { immediate: true, flush: 'post' }
+  )
 }
