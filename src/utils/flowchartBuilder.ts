@@ -12,6 +12,8 @@ export interface FlowNodeData {
   status: 'success' | 'failed' | 'running' | 'not-executed'
   executionOrder: number[]
   nodeInfos: NodeInfo[]
+  nodeWidth?: number
+  nodeHeight?: number
 }
 
 export interface FlowEdgeData {
@@ -24,8 +26,27 @@ export interface FlowEdgeData {
   routePoints?: Array<{ x: number; y: number }>
 }
 
-const NODE_WIDTH = 180
-const NODE_HEIGHT = 60
+const NODE_MIN_WIDTH = 88
+const NODE_HEIGHT = 44
+const NODE_HORIZONTAL_PADDING = 20
+const NARROW_CHAR_WIDTH = 7
+const WIDE_CHAR_WIDTH = 13
+
+const WIDE_CHAR_REGEX = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE10-\uFE6F\uFF00-\uFF60\uFFE0-\uFFE6]/u
+
+const estimateLabelWidth = (label: string): number => {
+  if (!label) return 0
+
+  let width = 0
+  for (const char of label) {
+    width += WIDE_CHAR_REGEX.test(char) ? WIDE_CHAR_WIDTH : NARROW_CHAR_WIDTH
+  }
+  return width
+}
+
+const resolveNodeWidth = (label: string): number => {
+  return Math.max(NODE_MIN_WIDTH, Math.ceil(estimateLabelWidth(label) + NODE_HORIZONTAL_PADDING))
+}
 
 const elk = new ELK()
 
@@ -107,9 +128,17 @@ export async function buildFlowchartData(task: TaskInfo, options: BuildFlowchart
 
   // 3. Build nodes
   const flowNodes: Node[] = []
+  const nodeSizeByName = new Map<string, { width: number; height: number }>()
   allNodeNames.forEach(name => {
     const executed = executedNodeMap.get(name)
     const status = resolveFlowNodeStatus(executed?.infos)
+    const nodeWidth = resolveNodeWidth(name)
+    const nodeHeight = NODE_HEIGHT
+
+    nodeSizeByName.set(name, {
+      width: nodeWidth,
+      height: nodeHeight,
+    })
 
     flowNodes.push({
       id: name,
@@ -120,6 +149,8 @@ export async function buildFlowchartData(task: TaskInfo, options: BuildFlowchart
         status,
         executionOrder: executed?.order ?? [],
         nodeInfos: executed?.infos ?? [],
+        nodeWidth,
+        nodeHeight,
       } satisfies FlowNodeData,
     })
   })
@@ -264,8 +295,8 @@ export async function buildFlowchartData(task: TaskInfo, options: BuildFlowchart
     },
     children: flowNodes.map(node => ({
       id: node.id,
-      width: NODE_WIDTH,
-      height: NODE_HEIGHT,
+      width: nodeSizeByName.get(node.id)?.width ?? NODE_MIN_WIDTH,
+      height: nodeSizeByName.get(node.id)?.height ?? NODE_HEIGHT,
     })),
     edges: flowEdges.map(edge => ({
       id: edge.id,

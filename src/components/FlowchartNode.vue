@@ -1,30 +1,35 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import type { FlowNodeData } from '../utils/flowchartBuilder'
 
-defineProps<{
+const props = defineProps<{
   data: FlowNodeData
   selected?: boolean
   isStart?: boolean
   dimmed?: boolean
 }>()
+
+const nodeStyle = computed(() => {
+  const width = props.data.nodeWidth ?? 120
+  const height = props.data.nodeHeight ?? 44
+  return {
+    width: `${width}px`,
+    height: `${height}px`,
+  }
+})
 </script>
 
 <template>
   <div
     class="flowchart-node"
+    :style="nodeStyle"
     :class="[`status-${data.status}`, { selected, 'is-start': isStart, dimmed }]"
   >
     <Handle type="target" :position="Position.Top" />
 
     <div class="node-content">
       <span class="node-label">{{ data.label }}</span>
-      <span
-        v-if="data.executionOrder.length > 0"
-        class="node-badge"
-      >
-        #{{ data.executionOrder.join(',#') }}
-      </span>
     </div>
 
     <Handle type="source" :position="Position.Bottom" />
@@ -33,8 +38,6 @@ defineProps<{
 
 <style scoped>
 .flowchart-node {
-  width: 180px;
-  height: 60px;
   border-radius: 8px;
   display: flex;
   align-items: center;
@@ -89,25 +92,18 @@ defineProps<{
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 0 8px;
-  overflow: hidden;
+  justify-content: center;
+  padding: 0 10px;
+  width: 100%;
+  min-width: 0;
 }
 
 .node-label {
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: block;
+  max-width: 100%;
+  overflow: visible;
+  text-overflow: clip;
   white-space: nowrap;
   font-weight: 500;
-}
-
-.node-badge {
-  font-size: 11px;
-  padding: 0 6px;
-  border-radius: 8px;
-  background: var(--flowchart-badge-bg);
-  color: var(--flowchart-badge-text);
-  line-height: 16px;
 }
 </style>

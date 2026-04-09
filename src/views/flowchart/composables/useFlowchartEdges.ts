@@ -1,8 +1,8 @@
 import { computed, type Ref } from 'vue'
 import type { FlowEdgeData } from '../../../utils/flowchartBuilder'
 
-const FLOW_NODE_WIDTH = 180
-const FLOW_NODE_HEIGHT = 60
+const DEFAULT_NODE_WIDTH = 120
+const DEFAULT_NODE_HEIGHT = 44
 
 interface UseFlowchartEdgesOptions {
   flowNodes: Ref<any[]>
@@ -10,7 +10,34 @@ interface UseFlowchartEdgesOptions {
   focusedNodeId: Ref<string | null>
   edgeStyle: Ref<string>
   edgeFlowEnabled: Ref<boolean>
-  getNodeById: (nodeId: string) => { position: { x: number; y: number } } | undefined
+  getNodeById: (nodeId: string) => any
+}
+
+const parseSizeValue = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  return null
+}
+
+const resolveNodeSize = (node: any): { width: number; height: number } => {
+  const width =
+    parseSizeValue(node?.dimensions?.width) ??
+    parseSizeValue(node?.width) ??
+    parseSizeValue(node?.style?.width) ??
+    parseSizeValue(node?.data?.nodeWidth) ??
+    DEFAULT_NODE_WIDTH
+
+  const height =
+    parseSizeValue(node?.dimensions?.height) ??
+    parseSizeValue(node?.height) ??
+    parseSizeValue(node?.style?.height) ??
+    parseSizeValue(node?.data?.nodeHeight) ??
+    DEFAULT_NODE_HEIGHT
+
+  return { width, height }
 }
 
 export const useFlowchartEdges = (options: UseFlowchartEdgesOptions) => {
@@ -157,12 +184,15 @@ export const useFlowchartEdges = (options: UseFlowchartEdgesOptions) => {
       const targetNode = options.getNodeById(edge.target) ?? fallbackNodeMap.get(edge.target)
       if (!sourceNode || !targetNode) return edge
 
+      const sourceSize = resolveNodeSize(sourceNode)
+      const targetSize = resolveNodeSize(targetNode)
+
       const start = {
-        x: sourceNode.position.x + FLOW_NODE_WIDTH / 2,
-        y: sourceNode.position.y + FLOW_NODE_HEIGHT,
+        x: sourceNode.position.x + sourceSize.width / 2,
+        y: sourceNode.position.y + sourceSize.height,
       }
       const end = {
-        x: targetNode.position.x + FLOW_NODE_WIDTH / 2,
+        x: targetNode.position.x + targetSize.width / 2,
         y: targetNode.position.y,
       }
 

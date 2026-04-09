@@ -13,12 +13,45 @@ interface UseFlowchartPlaybackOptions {
   isMobile: Ref<boolean>
   focusZoom: Ref<number>
   playbackIntervalMs: Ref<number>
-  getNodeById: (nodeId: string) => { position: { x: number; y: number } } | undefined
+  getNodeById: (nodeId: string) => any
   centerOnNode: (x: number, y: number, options: { zoom: number; duration: number }) => void
   popoverNodeId: Ref<string | null>
   updatePopoverPosition: () => void
   closePopover: () => void
   scrollNavToIndex: (index: number) => void
+}
+
+const DEFAULT_NODE_WIDTH = 120
+const DEFAULT_NODE_HEIGHT = 44
+
+const parseSizeValue = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  return null
+}
+
+const resolveNodeCenter = (node: any): { x: number; y: number } => {
+  const width =
+    parseSizeValue(node?.dimensions?.width) ??
+    parseSizeValue(node?.width) ??
+    parseSizeValue(node?.style?.width) ??
+    parseSizeValue(node?.data?.nodeWidth) ??
+    DEFAULT_NODE_WIDTH
+
+  const height =
+    parseSizeValue(node?.dimensions?.height) ??
+    parseSizeValue(node?.height) ??
+    parseSizeValue(node?.style?.height) ??
+    parseSizeValue(node?.data?.nodeHeight) ??
+    DEFAULT_NODE_HEIGHT
+
+  return {
+    x: node.position.x + width / 2,
+    y: node.position.y + height / 2,
+  }
 }
 
 export const useFlowchartPlayback = (options: UseFlowchartPlaybackOptions) => {
@@ -52,7 +85,8 @@ export const useFlowchartPlayback = (options: UseFlowchartPlaybackOptions) => {
 
     if (focusOptions?.center !== false) {
       if (flowNode) {
-        options.centerOnNode(flowNode.position.x + 90, flowNode.position.y + 30, {
+        const center = resolveNodeCenter(flowNode)
+        options.centerOnNode(center.x, center.y, {
           zoom: options.focusZoom.value,
           duration: 300,
         })
