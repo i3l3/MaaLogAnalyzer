@@ -1,5 +1,5 @@
 import type { Node, Edge } from '@vue-flow/core'
-import ELK from 'elkjs/lib/elk.bundled.js'
+import type ELK from 'elkjs/lib/elk.bundled.js'
 import type { TaskInfo, NodeInfo } from '../types'
 import { sortNodesByGlobalExecutionOrder } from './taskExecutionOrder'
 import {
@@ -48,7 +48,20 @@ const resolveNodeWidth = (label: string): number => {
   return Math.max(NODE_MIN_WIDTH, Math.ceil(estimateLabelWidth(label) + NODE_HORIZONTAL_PADDING))
 }
 
-const elk = new ELK()
+type ElkLayoutEngine = InstanceType<typeof ELK>
+
+let elkPromise: Promise<ElkLayoutEngine> | null = null
+
+const getElk = async (): Promise<ElkLayoutEngine> => {
+  if (!elkPromise) {
+    elkPromise = import('elkjs/lib/elk.bundled.js').then((module) => {
+      const ElkConstructor = module.default
+      return new ElkConstructor()
+    })
+  }
+
+  return elkPromise
+}
 
 interface ElkLayoutNode {
   id: string
@@ -94,6 +107,7 @@ const resolveFlowNodeStatus = (
 }
 
 export async function buildFlowchartData(task: TaskInfo, options: BuildFlowchartOptions = {}): Promise<{ nodes: Node[]; edges: Edge[] }> {
+  const elk = await getElk()
   const orderedNodes = sortNodesByGlobalExecutionOrder(task.nodes)
   const orderedExecutions = orderedNodes.map((node) => ({
     node,
