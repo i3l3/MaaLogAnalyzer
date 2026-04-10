@@ -2,7 +2,7 @@ import { computed, nextTick, watch, type Ref } from 'vue'
 import type { TaskInfo } from '../../../../types'
 import { buildFollowTasksFingerprint } from './fingerprint'
 import type { RealtimeNodeItem } from './types'
-import { findTaskIndex } from '../../../../utils/taskIdentity'
+import { findTaskIndex, isSameTask } from '../../../../utils/taskIdentity'
 
 interface SetupRealtimeFollowWatchersOptions {
   tasks: Ref<TaskInfo[]>
@@ -20,9 +20,13 @@ interface SetupRealtimeFollowWatchersOptions {
 
 export const setupRealtimeFollowWatchers = (options: SetupRealtimeFollowWatchersOptions) => {
   watch(() => options.selectedTask.value, async (newTask, oldTask) => {
-    const switchedTask = newTask !== oldTask
+    const switchedTask = (() => {
+      if (!newTask && !oldTask) return false
+      if (!newTask || !oldTask) return true
+      return !isSameTask(newTask, oldTask)
+    })()
 
-    if (newTask && switchedTask) {
+    if (newTask) {
       const index = findTaskIndex(options.tasks.value, newTask)
       if (index !== -1 && index !== options.activeTaskIndex.value) {
         options.activeTaskIndex.value = index
