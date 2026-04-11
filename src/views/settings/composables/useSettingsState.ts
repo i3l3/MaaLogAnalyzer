@@ -1,11 +1,9 @@
 import { useMessage } from 'naive-ui'
 import { getSettings, saveSettings, getDefaultSettings } from '../../../utils/settings'
-import { getAiSettings, saveAiSettings, getDefaultAiSettings } from '../../../utils/aiSettings'
 
 export const useSettingsState = () => {
   const message = useMessage()
   const settings = getSettings()
-  const aiSettings = getAiSettings()
 
   const playbackSpeedOptions = [
     { label: '慢速 1500ms', value: 1500 },
@@ -24,21 +22,17 @@ export const useSettingsState = () => {
 
   const handleSave = () => {
     saveSettings(settings)
-    saveAiSettings(aiSettings)
     message.success('设置已保存')
   }
 
   const handleReset = () => {
     Object.assign(settings, getDefaultSettings())
-    Object.assign(aiSettings, getDefaultAiSettings())
     saveSettings(settings)
-    saveAiSettings(aiSettings)
     message.success('已恢复默认设置')
   }
 
   return {
     settings,
-    aiSettings,
     playbackSpeedOptions,
     focusZoomOptions,
     handleSave,

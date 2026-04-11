@@ -15,7 +15,6 @@ import type {
 const SearchModePane = defineAsyncComponent(() => import('./SearchModePane.vue'))
 const StatisticsModePane = defineAsyncComponent(() => import('./StatisticsModePane.vue'))
 const FlowchartModePane = defineAsyncComponent(() => import('./FlowchartModePane.vue'))
-const AiModePane = defineAsyncComponent(() => import('./AiModePane.vue'))
 const MainContentSplitSection = defineAsyncComponent(() => import('./MainContentSplitSection.vue'))
 
 defineProps<{
@@ -98,19 +97,6 @@ const emit = defineEmits<{
       :on-navigate-to-node="onNavigateToNode"
       :on-upload-file="onUploadFile"
       :on-upload-content="onUploadContent"
-    />
-
-    <ai-mode-pane
-      v-else-if="viewMode === 'ai'"
-      :active="true"
-      :tasks="tasks"
-      :selected-task="selectedTask"
-      :selected-node="selectedNode"
-      :selected-flow-item-id="selectedFlowItemId"
-      :loaded-targets="textSearchViewProps.loadedTargets"
-      :loaded-default-target-id="textSearchViewProps.loadedDefaultTargetId"
-      :has-deferred-loaded-targets="textSearchViewProps.hasDeferredLoadedTargets"
-      :ensure-loaded-targets="textSearchViewProps.ensureLoadedTargets"
     />
 
     <main-content-split-section

@@ -5,12 +5,11 @@ import {
   ColumnHeightOutlined,
   DashboardOutlined,
   ApartmentOutlined,
-  RobotOutlined,
 } from '@vicons/antd'
 import { resolveEmbedProfile } from '../../../embed/profiles'
 import { EMBED_MODE_VSCODE_LAUNCH, parseEmbedMode } from '../../../utils/embedMode'
 
-type ViewMode = 'analysis' | 'search' | 'statistics' | 'flowchart' | 'ai' | 'split'
+type ViewMode = 'analysis' | 'search' | 'statistics' | 'flowchart' | 'split'
 
 const APP_LAYOUT_STORAGE_KEY = 'maa-log-analyzer-app-layout'
 
@@ -79,11 +78,6 @@ export const useAppViewState = () => {
       label: '流程图',
       key: 'flowchart' as ViewMode,
       icon: () => h(ApartmentOutlined),
-    },
-    {
-      label: 'AI 分析',
-      key: 'ai' as ViewMode,
-      icon: () => h(RobotOutlined),
     },
     {
       label: '分屏模式',

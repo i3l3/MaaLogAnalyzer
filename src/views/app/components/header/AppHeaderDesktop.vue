@@ -6,7 +6,6 @@ import {
   FileSearchOutlined,
   DashboardOutlined,
   ApartmentOutlined,
-  RobotOutlined,
   ColumnHeightOutlined,
   SettingOutlined,
   InfoCircleOutlined,
@@ -101,7 +100,6 @@ const processThreadSelectStyle = computed(() => {
                 <file-search-outlined v-else-if="viewMode === 'search'" />
                 <dashboard-outlined v-else-if="viewMode === 'statistics'" />
                 <apartment-outlined v-else-if="viewMode === 'flowchart'" />
-                <robot-outlined v-else-if="viewMode === 'ai'" />
                 <column-height-outlined v-else />
               </n-icon>
             </template>
