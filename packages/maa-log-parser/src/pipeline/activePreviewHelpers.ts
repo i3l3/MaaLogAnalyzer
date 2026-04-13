@@ -111,6 +111,9 @@ export const refreshActivePipelineNodePreview = (params: {
   })
 
   const runtimeActionState = getLatestActionRuntimeState(params.actionRuntimeStates)
+  const hasRunningRecognition =
+    topLevelRecognitions.some((attempt) => attempt.status === 'running') ||
+    actionRecognitions.some((attempt) => attempt.status === 'running')
   const resolvedActionId =
     runtimeActionState?.action_id ??
     activeNode.action_details?.action_id ??
@@ -124,8 +127,15 @@ export const refreshActivePipelineNodePreview = (params: {
     waitFreezesFlow: params.buildWaitFreezesFlowItems(),
     createActionRoot: (actionFlow) => {
       const inferredActionStatus = params.summarizeActionFlowStatus(actionFlow)
-      const actionRootStatus = runtimeActionState?.status ?? inferredActionStatus
+      let actionRootStatus = runtimeActionState?.status ?? inferredActionStatus
+      if (actionRootStatus === 'success' && hasRunningRecognition) {
+        actionRootStatus = 'running'
+      }
       if (!actionRootStatus) return null
+      const actionRootEndTs =
+        actionRootStatus === 'running'
+          ? undefined
+          : runtimeActionState?.end_ts || activeNode.action_details?.end_ts || nowTimestamp
 
       const runtimeActionErrorImage = actionRootStatus === 'failed'
         ? params.findErrorImageByNames(nowTimestamp, [
@@ -145,7 +155,7 @@ export const refreshActivePipelineNodePreview = (params: {
           activeNode.name,
         status: actionRootStatus,
         ts: runtimeActionState?.ts || activeNode.action_details?.ts || activeNode.ts,
-        endTs: runtimeActionState?.end_ts || activeNode.action_details?.end_ts || nowTimestamp,
+        endTs: actionRootEndTs,
         actionDetails: activeNode.action_details,
         errorImage: runtimeActionErrorImage,
       })
