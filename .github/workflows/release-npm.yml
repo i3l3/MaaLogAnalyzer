@@ -1,0 +1,93 @@
+name: Release npm Packages
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+    paths:
+      - 'packages/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/release-npm.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ github.repository_owner == 'MaaXYZ' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Publish packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "NPM_TOKEN is not set, skipping publish."
+            exit 0
+          fi
+
+          packages=(
+            "packages/maa-log-kernel"
+            "packages/maa-log-parser"
+            "packages/maa-log-runtime"
+            "packages/maa-log-adapter"
+            "packages/maa-log-tools"
+          )
+
+          for pkg_dir in "${packages[@]}"; do
+            echo "==== ${pkg_dir} ===="
+            cd "${pkg_dir}"
+
+            pkg_name=$(node -p "require('./package.json').name")
+            pkg_ver=$(node -p "require('./package.json').version")
+            pkg_private=$(node -p "Boolean(require('./package.json').private)")
+
+            if [ "${pkg_private}" = "true" ]; then
+              echo "Skip private package: ${pkg_name}"
+              cd - >/dev/null
+              continue
+            fi
+
+            if npm view "${pkg_name}@${pkg_ver}" >/dev/null 2>&1; then
+              echo "Skip existing version: ${pkg_name}@${pkg_ver}"
+              cd - >/dev/null
+              continue
+            fi
+
+            echo "Publish ${pkg_name}@${pkg_ver}"
+            pnpm publish --access public --provenance --no-git-checks
+            cd - >/dev/null
+          done
