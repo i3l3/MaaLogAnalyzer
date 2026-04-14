@@ -17,6 +17,10 @@ export const useTaskFilters = (options: UseTaskFiltersOptions) => {
   const availableProcessIds = ref<string[]>([])
   const availableThreadIds = ref<string[]>([])
 
+  const isSyntheticResourceTask = (task: TaskInfo): boolean => {
+    return typeof task.uuid === 'string' && task.uuid.startsWith('synthetic:resource_loading:')
+  }
+
   const clearRuntimeFilters = () => {
     selectedProcessId.value = ''
     selectedThreadId.value = ''
@@ -28,6 +32,8 @@ export const useTaskFilters = (options: UseTaskFiltersOptions) => {
 
   const filteredTasks = computed(() => {
     return options.tasks.value.filter(task => {
+      if (isSyntheticResourceTask(task)) return true
+
       if (selectedProcessId.value !== '') {
         const processId = options.parser.getTaskProcessId(task.task_id)
         if (processId !== selectedProcessId.value) return false

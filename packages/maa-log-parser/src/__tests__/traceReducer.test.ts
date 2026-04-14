@@ -305,6 +305,108 @@ describe('TraceReducer', () => {
     expect(action.status).toBe('succeeded')
   })
 
+  it('parents resource_loading under the active business scope from the same source', () => {
+    const events: ProtocolEvent[] = [
+      makeEvent({
+        kind: 'task',
+        seq: 1,
+        ts: '2026-04-08 00:00:01.000',
+        tsMs: 1,
+        processId: 'Px1',
+        threadId: 'Tx1',
+        source: { sourceKey: 'maa.log', inputIndex: 0, line: 1 },
+        rawMessage: 'Tasker.Task.Starting',
+        phase: 'starting',
+        rawDetails: { task_id: 1, entry: 'Main' },
+        taskId: 1,
+        entry: 'Main',
+      }),
+      makeEvent({
+        kind: 'pipeline_node',
+        seq: 2,
+        ts: '2026-04-08 00:00:02.000',
+        tsMs: 2,
+        processId: 'Px1',
+        threadId: 'Tx1',
+        source: { sourceKey: 'maa.log', inputIndex: 0, line: 2 },
+        rawMessage: 'Node.PipelineNode.Starting',
+        phase: 'starting',
+        rawDetails: { task_id: 1, node_id: 101, name: 'MainNode' },
+        taskId: 1,
+        nodeId: 101,
+        name: 'MainNode',
+      }),
+      makeEvent({
+        kind: 'resource_loading',
+        seq: 3,
+        ts: '2026-04-08 00:00:03.000',
+        tsMs: 3,
+        processId: 'Px1',
+        threadId: 'Tx1',
+        source: { sourceKey: 'maa.log', inputIndex: 0, line: 3 },
+        rawMessage: 'Resource.Loading.Starting',
+        phase: 'starting',
+        rawDetails: { res_id: 301, path: 'cache/main.png', type: 'image' },
+        resId: 301,
+        path: 'cache/main.png',
+        resourceType: 'image',
+      }),
+      makeEvent({
+        kind: 'resource_loading',
+        seq: 4,
+        ts: '2026-04-08 00:00:04.000',
+        tsMs: 4,
+        processId: 'Px1',
+        threadId: 'Tx1',
+        source: { sourceKey: 'maa.log', inputIndex: 0, line: 4 },
+        rawMessage: 'Resource.Loading.Succeeded',
+        phase: 'succeeded',
+        rawDetails: { res_id: 301, path: 'cache/main.png', type: 'image' },
+        resId: 301,
+        path: 'cache/main.png',
+        resourceType: 'image',
+      }),
+      makeEvent({
+        kind: 'pipeline_node',
+        seq: 5,
+        ts: '2026-04-08 00:00:05.000',
+        tsMs: 5,
+        processId: 'Px1',
+        threadId: 'Tx1',
+        source: { sourceKey: 'maa.log', inputIndex: 0, line: 5 },
+        rawMessage: 'Node.PipelineNode.Succeeded',
+        phase: 'succeeded',
+        rawDetails: { task_id: 1, node_id: 101, name: 'MainNode' },
+        taskId: 1,
+        nodeId: 101,
+        name: 'MainNode',
+      }),
+      makeEvent({
+        kind: 'task',
+        seq: 6,
+        ts: '2026-04-08 00:00:06.000',
+        tsMs: 6,
+        processId: 'Px1',
+        threadId: 'Tx1',
+        source: { sourceKey: 'maa.log', inputIndex: 0, line: 6 },
+        rawMessage: 'Tasker.Task.Succeeded',
+        phase: 'succeeded',
+        rawDetails: { task_id: 1, entry: 'Main' },
+        taskId: 1,
+        entry: 'Main',
+      }),
+    ]
+
+    const trace = buildTraceTree(events)
+
+    expect(trace.children).toHaveLength(1)
+    const task = trace.children[0]
+    expect(task.kind).toBe('task')
+    const pipeline = task.children[0]
+    expect(pipeline.kind).toBe('pipeline_node')
+    expect(pipeline.children.map((item) => item.kind)).toEqual(['resource_loading'])
+  })
+
   it('parents taskless foreign scopes under the active business scope from the same source', () => {
     const events: ProtocolEvent[] = [
       makeEvent({

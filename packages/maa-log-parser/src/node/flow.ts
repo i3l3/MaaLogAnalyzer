@@ -10,6 +10,7 @@ import { toTimestampMs } from '../shared/timestamp'
 
 const flowTitleMap: Record<UnifiedFlowItem['type'], UnifiedFlowGroup['title']> = {
   pipeline_node: 'PipelineNode',
+  resource_loading: 'Resource.Loading',
   recognition: 'Recognition',
   recognition_node: 'RecognitionNode',
   wait_freezes: 'WaitFreezes',
@@ -42,6 +43,7 @@ const actionTimelinePhaseWeight = (item: UnifiedFlowItem): number => {
     if (phase === 'post') return 40
     return 30
   }
+  if (item.type === 'resource_loading') return 2
   if (item.type === 'action' || item.type === 'action_node') return 10
   return 15
 }
@@ -400,13 +402,16 @@ export const buildNodeActionTimelineItems = (node: NodeInfo): UnifiedFlowItem[] 
     item => item.type === 'action' || item.type === 'action_node'
   ) || null
   const actionRootItem = actionRootFromFlow ?? buildFallbackActionRootItem(node)
-  const waitFreezesItems = nodeFlowItems.filter(item => item.type === 'wait_freezes')
+  const auxiliaryItems = nodeFlowItems.filter((item) =>
+    item.type === 'wait_freezes'
+    || item.type === 'resource_loading'
+  )
 
   const timelineItems: UnifiedFlowItem[] = []
   if (actionRootItem) {
     timelineItems.push(sortFlowTree(actionRootItem))
   }
-  timelineItems.push(...waitFreezesItems)
+  timelineItems.push(...auxiliaryItems)
 
   return sortActionTimelineItems(timelineItems).map(sortFlowTree)
 }

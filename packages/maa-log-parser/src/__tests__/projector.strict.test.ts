@@ -115,6 +115,120 @@ describe('Strict task projector semantics', () => {
     expect(task.nodes[0]?.node_flow ?? []).toEqual([])
   })
 
+  it('projects resource_loading into node flow with runtime context', async () => {
+    const lines = [
+      makeEventLine(1, 'Tasker.Task.Starting', { task_id: 1, entry: 'MainTask', hash: 'h-main', uuid: 'u-main' }),
+      makeEventLine(2, 'Node.PipelineNode.Starting', { task_id: 1, node_id: 101, name: 'MainNode' }),
+      makeEventLine(3, 'Resource.Loading.Starting', {
+        res_id: 301,
+        path: 'assets/cache/main.png',
+        type: 'image',
+        hash: 'hash-main',
+      }),
+      makeEventLine(4, 'Resource.Loading.Succeeded', {
+        res_id: 301,
+        path: 'assets/cache/main.png',
+        type: 'image',
+        hash: 'hash-main',
+      }),
+      makeEventLine(5, 'Node.NextList.Starting', {
+        task_id: 1,
+        name: 'MainNode',
+        list: [{ name: 'MainNode', anchor: false, jump_back: false }],
+      }),
+      makeEventLine(6, 'Node.NextList.Succeeded', {
+        task_id: 1,
+        name: 'MainNode',
+        list: [{ name: 'MainNode', anchor: false, jump_back: false }],
+      }),
+      makeEventLine(7, 'Node.PipelineNode.Succeeded', { task_id: 1, node_id: 101, name: 'MainNode' }),
+      makeEventLine(8, 'Tasker.Task.Succeeded', { task_id: 1, entry: 'MainTask', hash: 'h-main', uuid: 'u-main' }),
+    ]
+
+    const parser = new LogParser()
+    await parser.parseFile(lines.join('\n'))
+
+    const task = findTask(parser.getTasksSnapshot(), 1)
+    const nodeFlow = task.nodes[0]?.node_flow ?? []
+
+    expect(nodeFlow.map((item) => item.type)).toEqual(['resource_loading'])
+    expect(nodeFlow[0]).toMatchObject({
+      type: 'resource_loading',
+      name: 'main.png',
+      task_id: 1,
+      node_id: 101,
+      resource_loading_details: {
+        res_id: 301,
+        path: 'assets/cache/main.png',
+        resource_type: 'image',
+        hash: 'hash-main',
+      },
+    })
+  })
+
+  it('projects root-level resource_loading into a synthetic global task for task-centric UI', async () => {
+    const lines = [
+      makeEventLine(1, 'Resource.Loading.Starting', {
+        res_id: 501,
+        path: 'resource/base/image.png',
+        type: 'image',
+        hash: 'hash-image',
+      }),
+      makeEventLine(2, 'Resource.Loading.Succeeded', {
+        res_id: 501,
+        path: 'resource/base/image.png',
+        type: 'image',
+        hash: 'hash-image',
+      }),
+      makeEventLine(3, 'Resource.Loading.Starting', {
+        res_id: 502,
+        path: 'resource/base/pipeline.json',
+        type: 'pipeline',
+        hash: 'hash-pipeline',
+      }),
+      makeEventLine(4, 'Resource.Loading.Succeeded', {
+        res_id: 502,
+        path: 'resource/base/pipeline.json',
+        type: 'pipeline',
+        hash: 'hash-pipeline',
+      }),
+      makeEventLine(5, 'Tasker.Task.Starting', { task_id: 1, entry: 'MainTask', hash: 'h-main', uuid: 'u-main' }),
+      makeEventLine(6, 'Node.PipelineNode.Starting', { task_id: 1, node_id: 101, name: 'MainNode' }),
+      makeEventLine(7, 'Node.PipelineNode.Succeeded', { task_id: 1, node_id: 101, name: 'MainNode' }),
+      makeEventLine(8, 'Tasker.Task.Succeeded', { task_id: 1, entry: 'MainTask', hash: 'h-main', uuid: 'u-main' }),
+    ]
+
+    const parser = new LogParser()
+    await parser.parseFile(lines.join('\n'))
+
+    const tasks = parser.getTasksSnapshot()
+    expect(tasks).toHaveLength(2)
+
+    expect(tasks[0]).toMatchObject({
+      task_id: 0,
+      entry: '[Global] Resource.Loading',
+      uuid: 'synthetic:resource_loading:1:seq1',
+      status: 'succeeded',
+    })
+    expect(tasks[0]?.nodes).toHaveLength(1)
+    expect(tasks[0]?.nodes[0]).toMatchObject({
+      node_id: 0,
+      name: 'Resource.Loading',
+      status: 'success',
+    })
+    expect(tasks[0]?.nodes[0]?.node_flow?.map((item) => item.type)).toEqual([
+      'resource_loading',
+      'resource_loading',
+    ])
+    expect(tasks[0]?.nodes[0]?.node_flow?.map((item) => item.name)).toEqual([
+      'image.png',
+      'pipeline.json',
+    ])
+
+    expect(tasks[1]?.task_id).toBe(1)
+    expect(tasks[1]?.entry).toBe('MainTask')
+  })
+
   it('keeps main wait_freezes as a top-level sibling instead of nesting it into subtask flow', async () => {
     const lines = [
       makeEventLine(1, 'Tasker.Task.Starting', { task_id: 1, entry: 'MainTask', hash: 'h-main', uuid: 'u-main' }),

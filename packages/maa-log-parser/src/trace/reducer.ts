@@ -239,7 +239,7 @@ const resolveParentScope = (
 
   switch (event.kind) {
     case 'resource_loading':
-      return state.root
+      return findNearestOpenBusinessScope(state, { event }) ?? state.root
     case 'controller_action':
       return findNearestOpenBusinessScope(state, { event }) ?? state.root
     case 'task':

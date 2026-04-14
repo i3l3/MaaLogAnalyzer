@@ -4,6 +4,7 @@ import type {
   NextListItem,
   NodeInfo,
   RecognitionDetail,
+  ResourceLoadingDetail,
   TaskInfo,
   UnifiedFlowItem,
   WaitFreezesDetail,
@@ -22,8 +23,14 @@ import type { ScopeNode, ScopeStatus } from '../trace/scopeTypes'
  * compatibility shaping here.
  */
 interface ProjectionContext {
+  currentTaskId?: number
   currentNodeId?: number
   options: ProjectTasksFromTraceOptions
+}
+
+interface ProjectedTaskEntry {
+  seq: number
+  task: TaskInfo
 }
 
 export interface ProjectTasksFromTraceOptions {
@@ -223,6 +230,46 @@ const normalizeActionDetail = (
   }
 }
 
+const normalizeResourceLoadingDetail = (
+  scope: ScopeNode,
+): ResourceLoadingDetail | undefined => {
+  const payload = readScopePayload(scope)
+  const resId = readNumberField(payload, 'resId', 'res_id')
+  const path = readStringField(payload, 'path')
+  const resourceType = readStringField(payload, 'resourceType', 'resource_type')
+  const hash = readStringField(payload, 'hash')
+
+  if (resId == null && !path && !resourceType && !hash) return undefined
+
+  return {
+    res_id: resId ?? 0,
+    path,
+    resource_type: resourceType,
+    hash,
+  }
+}
+
+const readLastPathSegment = (
+  path?: string,
+): string | undefined => {
+  if (!path) return undefined
+  const normalized = path.replace(/[\\/]+$/, '')
+  if (!normalized) return undefined
+  const segments = normalized.split(/[\\/]/).filter(Boolean)
+  return segments[segments.length - 1] ?? normalized
+}
+
+const resolveResourceLoadingName = (
+  scope: ScopeNode,
+): string => {
+  const payload = readScopePayload(scope)
+  const path = readStringField(payload, 'path')
+  return readLastPathSegment(path)
+    ?? readStringField(payload, 'resourceType', 'resource_type')
+    ?? readStringField(payload, 'hash')
+    ?? 'Resource.Loading'
+}
+
 const normalizeWaitFreezesDetail = (
   scope: ScopeNode,
   options: ProjectTasksFromTraceOptions,
@@ -304,6 +351,22 @@ const summarizeFlowItemStatus = (
   if (items.some((item) => item.status === 'failed')) return 'failed'
   if (items.some((item) => item.status === 'running')) return 'running'
   return 'success'
+}
+
+const runtimeStatusToTaskStatus = (
+  status: UnifiedFlowItem['status'],
+): TaskInfo['status'] => {
+  if (status === 'failed') return 'failed'
+  if (status === 'running') return 'running'
+  return 'succeeded'
+}
+
+const buildDuration = (
+  startTime: string,
+  endTime?: string,
+): number | undefined => {
+  if (!endTime) return undefined
+  return Math.max(0, Date.parse(endTime) - Date.parse(startTime))
 }
 
 const shouldSynthesizeForeignTaskGroup = (
@@ -438,6 +501,7 @@ const projectTaskFlowItem = (
 ): UnifiedFlowItem => {
   const payload = readScopePayload(scope)
   const children = projectFlowChildren(scope, {
+    currentTaskId: readScopeTaskId(scope),
     options: context.options,
   })
 
@@ -470,6 +534,7 @@ const projectPipelineNodeFlowItem = (
   const nodeId = readScopeNodeId(scope) ?? context.currentNodeId
   const nodeName = readScopeName(scope)
   const children = projectFlowChildren(scope, {
+    currentTaskId: readScopeTaskId(scope) ?? context.currentTaskId,
     currentNodeId: nodeId,
     options: context.options,
   })
@@ -490,6 +555,26 @@ const projectPipelineNodeFlowItem = (
       readNestedDetailName(payload, 'actionDetails'),
       readNestedDetailName(payload, 'recoDetails'),
     ]),
+    children: children.length > 0 ? children : undefined,
+  }
+}
+
+const projectResourceLoadingFlowItem = (
+  scope: ScopeNode,
+  context: ProjectionContext,
+): UnifiedFlowItem => {
+  const children = projectFlowChildren(scope, context)
+
+  return {
+    id: scope.id,
+    type: 'resource_loading',
+    name: resolveResourceLoadingName(scope),
+    status: toRuntimeStatus(scope.status),
+    ts: scope.ts,
+    end_ts: scope.endTs,
+    task_id: readScopeTaskId(scope) ?? context.currentTaskId,
+    node_id: context.currentNodeId,
+    resource_loading_details: normalizeResourceLoadingDetail(scope),
     children: children.length > 0 ? children : undefined,
   }
 }
@@ -640,6 +725,8 @@ const projectFlowScope = (
       return [projectTaskFlowItem(scope, context)]
     case 'pipeline_node':
       return [projectPipelineNodeFlowItem(scope, context)]
+    case 'resource_loading':
+      return [projectResourceLoadingFlowItem(scope, context)]
     case 'recognition':
       return [projectRecognitionFlowItem(scope, context)]
     case 'recognition_node':
@@ -653,7 +740,6 @@ const projectFlowScope = (
     case 'next_list':
       return sortScopesBySeq(scope.children).flatMap((child) => projectFlowScope(child, context))
     case 'controller_action':
-    case 'resource_loading':
     case 'trace_root':
       return []
   }
@@ -680,6 +766,7 @@ const projectPipelineNodeScope = (
   const taskId = readScopeTaskId(scope) ?? 0
   const nodeName = readScopeName(scope)
   const nodeFlow = projectFlowChildren(scope, {
+    currentTaskId: taskId,
     currentNodeId: nodeId,
     options,
   })
@@ -729,6 +816,78 @@ const projectTaskScope = (
   }
 }
 
+const collectRootResourceScopeGroups = (
+  root: ScopeNode,
+): ScopeNode[][] => {
+  const groups: ScopeNode[][] = []
+  let currentGroup: ScopeNode[] = []
+
+  for (const child of sortScopesBySeq(root.children)) {
+    if (child.kind === 'resource_loading') {
+      currentGroup.push(child)
+      continue
+    }
+
+    if (currentGroup.length > 0) {
+      groups.push(currentGroup)
+      currentGroup = []
+    }
+  }
+
+  if (currentGroup.length > 0) {
+    groups.push(currentGroup)
+  }
+
+  return groups
+}
+
+const projectRootResourceTaskEntry = (
+  groupedScopes: ScopeNode[],
+  options: ProjectTasksFromTraceOptions,
+  groupIndex: number,
+): ProjectedTaskEntry | null => {
+  const firstScope = groupedScopes[0]
+  const lastScope = groupedScopes[groupedScopes.length - 1]
+  if (!firstScope || !lastScope) return null
+
+  const taskUuid = `synthetic:resource_loading:${groupIndex + 1}:seq${firstScope.seq}`
+  const taskId = 0
+  const nodeId = 0
+  const nodeFlow = groupedScopes.flatMap((scope) => projectFlowScope(scope, {
+    currentTaskId: taskId,
+    currentNodeId: nodeId,
+    options,
+  }))
+  const runtimeStatus = summarizeFlowItemStatus(nodeFlow)
+  const endTime = lastScope.endTs
+  const task: TaskInfo = {
+    task_id: taskId,
+    entry: '[Global] Resource.Loading',
+    hash: '',
+    uuid: taskUuid,
+    start_time: firstScope.ts,
+    end_time: endTime,
+    status: runtimeStatusToTaskStatus(runtimeStatus),
+    nodes: [{
+      node_id: nodeId,
+      name: 'Resource.Loading',
+      ts: firstScope.ts,
+      end_ts: endTime,
+      status: runtimeStatus,
+      task_id: taskId,
+      next_list: [],
+      node_flow: nodeFlow,
+    }],
+    events: [],
+    duration: buildDuration(firstScope.ts, endTime),
+  }
+
+  return {
+    seq: firstScope.seq,
+    task,
+  }
+}
+
 export const projectTasksFromTrace = (
   root: ScopeNode,
   options: ProjectTasksFromTraceOptions = {},
@@ -736,7 +895,18 @@ export const projectTasksFromTrace = (
   const taskScopes: ScopeNode[] = []
   collectTaskScopes(root, taskScopes)
 
-  return sortScopesBySeq(taskScopes)
-    .map((scope) => projectTaskScope(scope, options))
+  const projectedTaskEntries: ProjectedTaskEntry[] = sortScopesBySeq(taskScopes)
+    .map((scope) => ({
+      seq: scope.seq,
+      task: projectTaskScope(scope, options),
+    }))
+
+  const rootResourceTaskEntries = collectRootResourceScopeGroups(root)
+    .map((groupedScopes, groupIndex) => projectRootResourceTaskEntry(groupedScopes, options, groupIndex))
+    .filter((entry): entry is ProjectedTaskEntry => !!entry)
+
+  return [...projectedTaskEntries, ...rootResourceTaskEntries]
+    .sort((left, right) => left.seq - right.seq)
+    .map(({ task }) => task)
     .filter((task) => task.entry !== 'MaaTaskerPostStop')
 }

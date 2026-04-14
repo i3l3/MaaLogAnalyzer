@@ -150,6 +150,13 @@ export interface ActionDetail {
 	end_ts?: string
 }
 
+export interface ResourceLoadingDetail {
+	res_id: number
+	path?: string
+	resource_type?: string
+	hash?: string
+}
+
 export interface WaitFreezesDetail {
 	wf_id: number
 	phase?: string
@@ -170,6 +177,7 @@ export interface WaitFreezesDetail {
 export type UnifiedFlowType =
 	| 'task'
 	| 'pipeline_node'
+	| 'resource_loading'
 	| 'recognition'
 	| 'recognition_node'
 	| 'wait_freezes'
@@ -191,6 +199,7 @@ export interface UnifiedFlowItem {
 	task_details?: NestedActionGroup['task_details']
 	reco_details?: RecognitionDetail
 	action_details?: ActionDetail
+	resource_loading_details?: ResourceLoadingDetail
 	wait_freezes_details?: WaitFreezesDetail
 	error_image?: string
 	vision_image?: string
