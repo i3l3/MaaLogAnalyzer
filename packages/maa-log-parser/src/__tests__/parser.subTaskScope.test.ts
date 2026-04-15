@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { UnifiedFlowItem } from '@windsland52/maa-log-parser/types'
-import { LogParser } from '@windsland52/maa-log-parser'
+import type { UnifiedFlowItem } from '../shared/types'
+import { LogParser } from '../core/logParser'
 
 const formatTimestamp = (eventIndex: number): string => {
   const second = Math.floor(eventIndex / 1000)
@@ -409,6 +409,36 @@ describe('LogParser sub task scoped node aggregation', () => {
     expect(matchedTasks).toHaveLength(1)
     expect(matchedTasks[0].status).toBe('succeeded')
     expect(matchedTasks[0].nodes.length).toBe(1)
+  })
+
+  it('deduplicates delayed mirrored cross-source Tasker.Task.Succeeded without creating an empty terminal task', async () => {
+    const lines = [
+      makeEventLine(200, 'Tasker.Task.Starting', { task_id: 92, entry: 'MainTask', hash: 'h-main-92', uuid: 'u-main-92' }, {
+        processId: 'Px1',
+        threadId: 'Tx1',
+      }),
+      makeEventLine(201, 'Node.PipelineNode.Starting', { task_id: 92, node_id: 9201, name: 'MainNode' }),
+      makeEventLine(202, 'Node.PipelineNode.Succeeded', { task_id: 92, node_id: 9201, name: 'MainNode' }),
+      makeEventLine(203, 'Tasker.Task.Succeeded', { task_id: 92, entry: 'MainTask', hash: 'h-main-92', uuid: 'u-main-92' }, {
+        processId: 'Px1',
+        threadId: 'Tx1',
+      }),
+      makeEventLine(230, 'Tasker.Task.Succeeded', { task_id: 92, entry: 'MainTask', hash: 'h-main-92', uuid: 'u-main-92' }, {
+        processId: 'Px2',
+        threadId: 'Tx2',
+      }),
+    ]
+
+    const parser = new LogParser()
+    await parser.parseFile(lines.join('\n'))
+    const tasks = parser.getTasksSnapshot()
+    const matchedTasks = tasks.filter(item => item.task_id === 92)
+
+    expect(matchedTasks).toHaveLength(1)
+    expect(matchedTasks[0]?.status).toBe('succeeded')
+    expect(matchedTasks[0]?.nodes).toHaveLength(1)
+    expect(matchedTasks[0]?.start_time).toBe('2026-04-06 10:00:00.200')
+    expect(matchedTasks[0]?.end_time).toBe('2026-04-06 10:00:00.203')
   })
 
   it('keeps same-source duplicate Tasker.Task.Starting as separate task scopes', async () => {

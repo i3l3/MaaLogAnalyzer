@@ -71,10 +71,11 @@ const forceCopyString = (value: string): string => {
   return copied
 }
 
-// Mirrored OnEventNotify lines from agent/server pairs can arrive a few extra
+// Mirrored OnEventNotify lines from agent/server pairs can arrive tens of
 // milliseconds after the primary emitter. Keep the cross-source dedup window
-// slightly wider so lone mirrored `starting` events do not leak into the trace.
-const CROSS_SOURCE_DUPLICATE_WINDOW_MS = 20
+// wide enough so delayed mirrored terminal events do not create synthetic
+// empty scopes after the real scope has already been closed.
+const CROSS_SOURCE_DUPLICATE_WINDOW_MS = 50
 
 export class LogParser {
   private events: EventNotification[] = []
