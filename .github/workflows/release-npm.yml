@@ -65,6 +65,24 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Update package versions from tag
+        run: |
+          ver=${{ github.ref_name }}
+          ver=${ver#v}
+          echo "Setting package version to ${ver}"
+
+          packages=(
+            "packages/maa-log-kernel"
+            "packages/maa-log-parser"
+            "packages/maa-log-runtime"
+            "packages/maa-log-adapter"
+            "packages/maa-log-tools"
+          )
+
+          for pkg_dir in "${packages[@]}"; do
+            npm --prefix "${pkg_dir}" pkg set version="${ver}"
+          done
+
       - name: Build packages
         run: pnpm build:packages
 
