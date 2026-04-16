@@ -6,9 +6,12 @@ import {
   NEmpty,
   NText,
 } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import TextSearchLargeFileContext from './TextSearchLargeFileContext.vue'
 import TextSearchLargeFileEmpty from './TextSearchLargeFileEmpty.vue'
 import TextSearchVirtualFileContent from './TextSearchVirtualFileContent.vue'
+
+const { t } = useI18n()
 
 interface FileLineItem {
   key: number
@@ -49,7 +52,7 @@ defineExpose({
 <template>
   <n-card
     data-tour="textsearch-content"
-    :title="props.isLargeFile ? '📦 大文件信息' : '📄 文件内容'"
+    :title="props.isLargeFile ? t('textSearch.largeFileInfo') : t('textSearch.fileContent')"
     size="small"
     style="height: 100%"
     content-style="height: 100%; overflow: hidden; padding: 0"
@@ -61,13 +64,13 @@ defineExpose({
         :type="props.showFileContent ? 'primary' : 'default'"
         @click="emit('update:showFileContent', !props.showFileContent)"
       >
-        {{ props.showFileContent ? '隐藏内容' : '显示内容' }}
+        {{ props.showFileContent ? t('textSearch.hideContent') : t('textSearch.showContent') }}
       </n-button>
     </template>
 
     <div style="height: 100%; display: flex; flex-direction: column">
       <div v-if="!props.fileName" style="padding: 40px 20px; text-align: center; flex: 1">
-        <n-empty description="请先加载文件" />
+        <n-empty :description="t('textSearch.loadFileFirst')" />
       </div>
 
       <div v-else-if="props.isLargeFile" style="height: 100%; display: flex; flex-direction: column">
@@ -89,10 +92,10 @@ defineExpose({
       </div>
 
       <div v-else-if="!props.showFileContent" style="padding: 40px 20px; text-align: center; flex: 1">
-        <n-empty description="点击右上角显示文件内容">
+        <n-empty :description="t('textSearch.clickToShowContent')">
           <template #extra>
             <n-text depth="3" style="font-size: 12px">
-              文件已加载 ({{ props.totalLines }} 行)，点击搜索结果会自动显示
+              {{ t('textSearch.fileLoaded', { n: props.totalLines }) }}
             </n-text>
           </template>
         </n-empty>

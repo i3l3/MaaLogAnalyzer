@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { NTag } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import type { NodeInfo } from '../../../types'
 import { convertFileSrc } from '../utils/nodeImageLookup'
 import SafePreviewImage from '../../../components/SafePreviewImage.vue'
+
+const { t } = useI18n()
 
 interface FlowchartPopoverData {
   label: string
@@ -95,7 +98,7 @@ watch(
       <button
         class="popover-filter-btn"
         type="button"
-        :title="showAbnormalOnly ? '仅显示异常执行（点击显示全部）' : '显示全部执行（点击仅异常）'"
+        :title="showAbnormalOnly ? t('flowchart.popover.showAbnormalOnly') : t('flowchart.popover.showAll')"
         :disabled="!hasAbnormalEntries"
         @click="toggleAbnormalOnly"
       >
@@ -105,34 +108,34 @@ watch(
     </div>
     <div class="popover-body">
       <div v-if="popoverEntries.length === 0" class="popover-empty">
-        暂无异常执行
+        {{ t('flowchart.popover.noAbnormal') }}
       </div>
       <div
         v-for="(entry, idx) in popoverEntries"
         :key="`${entry.executionOrder}-${entry.info.node_id}-${idx}`"
       >
         <div v-if="popoverData.nodeInfos.length > 1" class="popover-exec-label">
-          执行 #{{ entry.executionOrder }}
+          {{ t('flowchart.popover.execution', { n: entry.executionOrder }) }}
         </div>
         <div class="popover-row">
           <n-tag size="tiny" :type="getRuntimeStatusTagType(entry.info.status)">
             {{ getRuntimeStatusText(entry.info.status) }}
           </n-tag>
           <span class="popover-time">{{ entry.info.ts }}</span>
-          <span class="popover-locate" @click="emit('navigate-to-node', entry.info)">定位</span>
+          <span class="popover-locate" @click="emit('navigate-to-node', entry.info)">{{ t('flowchart.popover.locate') }}</span>
         </div>
         <div v-if="entry.info.reco_details" class="popover-row">
-          <span class="popover-label">识别</span>
+          <span class="popover-label">{{ t('flowchart.popover.recognition') }}</span>
           <span>{{ entry.info.reco_details.algorithm }}</span>
           <span v-if="entry.info.reco_details.box" class="popover-secondary">
             [{{ entry.info.reco_details.box.join(', ') }}]
           </span>
         </div>
         <div v-if="entry.info.action_details" class="popover-row">
-          <span class="popover-label">动作</span>
+          <span class="popover-label">{{ t('flowchart.popover.action') }}</span>
           <span>{{ entry.info.action_details.action }}</span>
           <n-tag size="tiny" :type="entry.info.status === 'running' ? 'warning' : entry.info.action_details.success ? 'success' : 'error'" style="margin-left: 4px">
-            {{ entry.info.status === 'running' ? getRuntimeStatusText(entry.info.status) : entry.info.action_details.success ? '成功' : '失败' }}
+            {{ entry.info.status === 'running' ? getRuntimeStatusText(entry.info.status) : entry.info.action_details.success ? t('flowchart.popover.success') : t('flowchart.popover.failed') }}
           </n-tag>
         </div>
         <safe-preview-image

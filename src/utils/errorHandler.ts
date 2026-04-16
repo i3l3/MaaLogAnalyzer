@@ -1,3 +1,5 @@
+import { i18n } from '../i18n'
+
 /**
  * 错误处理工具模块
  * 提供统一的错误信息规范化处理
@@ -21,7 +23,7 @@ export const getErrorMessage = (err: unknown): string => {
   try {
     return String(err)
   } catch {
-    return '未知错误'
+    return i18n.global.t('error.unknown')
   }
 }
 

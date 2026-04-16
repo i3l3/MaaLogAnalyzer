@@ -5,6 +5,7 @@ import {
   buildRecognitionTargetByNextName,
 } from '@windsland52/maa-log-tools/next-list-presentation'
 import type { NodeNavMatchDetail, NodeNavMatchKind } from './types'
+import { i18n } from '../../../../i18n'
 
 export const normalizeSearchText = (value: unknown): string => {
   if (typeof value !== 'string') return ''
@@ -22,11 +23,11 @@ const matchesKeyword = (query: string, keyword: string): boolean => {
 }
 
 const isJumpBackKeyword = (query: string): boolean => {
-  return matchesKeyword(query, 'jumpback') || matchesKeyword(query, 'jump back') || matchesKeyword(query, '跳回')
+  return matchesKeyword(query, 'jumpback') || matchesKeyword(query, 'jump back') || matchesKeyword(query, '跳回') || matchesKeyword(query, i18n.global.t('process.jumpbackKeyword'))
 }
 
 const isAnchorKeyword = (query: string): boolean => {
-  return matchesKeyword(query, 'anchor') || matchesKeyword(query, '锚点')
+  return matchesKeyword(query, 'anchor') || matchesKeyword(query, '锚点') || matchesKeyword(query, i18n.global.t('process.anchorKeyword'))
 }
 
 const pushUniqueNodeNavMatchDetail = (
@@ -78,7 +79,7 @@ export const collectNodeNavMatchDetails = (node: NodeInfo, query: string): NodeN
   const recognitionTargetByNextName = buildRecognitionTargetByNextName(attempts, node.next_list ?? [])
 
   if (includesSearchText(node.name, query)) {
-    pushUniqueNodeNavMatchDetail(details, seen, { kind: 'node', text: node.name || '未命名节点' })
+    pushUniqueNodeNavMatchDetail(details, seen, { kind: 'node', text: node.name || i18n.global.t('process.unnamedNode') })
   }
 
   for (const item of node.next_list ?? []) {

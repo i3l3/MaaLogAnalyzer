@@ -7,7 +7,10 @@ import {
   NSwitch,
   NText,
 } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import type { AppSettings } from '../../../utils/settings'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   settings: AppSettings
@@ -18,37 +21,37 @@ const props = defineProps<{
 
 <template>
   <n-card size="small" :bordered="true" style="margin-bottom: 12px">
-    <n-text strong style="font-size: 16px; display: block; margin-bottom: 16px">流程图</n-text>
+    <n-text strong style="font-size: 16px; display: block; margin-bottom: 16px">{{ t('settings.flowchart.title') }}</n-text>
 
     <table class="settings-grid" role="presentation">
       <tbody>
         <tr>
-          <td>连线方式</td>
+          <td>{{ t('settings.flowchart.edgeStyle') }}</td>
           <td>
             <n-radio-group v-model:value="props.settings.flowchartEdgeStyle">
-              <n-radio-button value="orthogonal">避障折线</n-radio-button>
-              <n-radio-button value="default">平滑曲线</n-radio-button>
+              <n-radio-button value="orthogonal">{{ t('settings.flowchart.orthogonal') }}</n-radio-button>
+              <n-radio-button value="default">{{ t('settings.flowchart.smooth') }}</n-radio-button>
             </n-radio-group>
           </td>
         </tr>
 
         <tr>
-          <td>连线流动动画</td>
+          <td>{{ t('settings.flowchart.edgeFlow') }}</td>
           <td><n-switch v-model:value="props.settings.flowchartEdgeFlowEnabled" /></td>
         </tr>
 
         <tr>
-          <td>拖动后自动重排</td>
+          <td>{{ t('settings.flowchart.relayout') }}</td>
           <td><n-switch v-model:value="props.settings.flowchartRelayoutAfterDrag" /></td>
         </tr>
 
         <tr>
-          <td>忽略未经过节点</td>
+          <td>{{ t('settings.flowchart.ignoreUnexecuted') }}</td>
           <td><n-switch v-model:value="props.settings.flowchartIgnoreUnexecutedNodes" /></td>
         </tr>
 
         <tr>
-          <td>回放速度</td>
+          <td>{{ t('settings.flowchart.playbackSpeed') }}</td>
           <td>
             <n-select
               v-model:value="props.settings.flowchartPlaybackIntervalMs"
@@ -59,7 +62,7 @@ const props = defineProps<{
         </tr>
 
         <tr>
-          <td>聚焦缩放</td>
+          <td>{{ t('settings.flowchart.focusZoom') }}</td>
           <td>
             <n-select
               v-model:value="props.settings.flowchartFocusZoom"

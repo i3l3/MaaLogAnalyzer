@@ -5,6 +5,7 @@ import {
 } from './executorHelpers'
 import { buildSearchResultState, buildSourceReadyOptions } from './optionBuilders'
 import { ensureSearchSourceReady } from './sourceGuard'
+import { i18n } from '../../../../i18n'
 import type { TextSearchSearchExecutorOptions } from './executorTypes'
 
 export const ensureSearchPreconditions = async (
@@ -31,7 +32,7 @@ export const ensureSearchPreconditions = async (
     options.fileContent.value,
     options.fileHandle.value,
   )) {
-    alert('请先选择文件')
+    alert(i18n.global.t('textSearch.selectFileFirst'))
     return false
   }
 

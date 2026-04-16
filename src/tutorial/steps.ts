@@ -1,131 +1,134 @@
+import { i18n } from '../i18n'
 import type { TourStep } from './types'
 
 export const TOUR_VERSION = 3
 export const TOUR_STORAGE_KEY = 'maa-log-analyzer-tutorial-version'
 
-// Boarded by sections: overall intro first, then each feature area.
-export const TOUR_STEPS: TourStep[] = [
-  {
-    id: 'view-switch',
-    sectionId: 'overview',
-    sectionTitle: '整体介绍',
-    title: '切换模式',
-    content: '这里可以在日志分析、文本搜索、流程图和统计之间切换。',
-    target: '[data-tour="header-view-switch"]',
-    mobileTarget: '[data-tour="header-mobile-menu"]',
-    view: 'analysis',
-    placement: 'bottom',
-    nextLabel: '下一步',
-    sinceVersion: 1
-  },
-  {
-    id: 'settings-entry',
-    sectionId: 'overview',
-    sectionTitle: '整体介绍',
-    title: '设置',
-    content: '点击这里打开设置面板，调整显示和交互行为。',
-    target: '[data-tour="header-settings-button"]',
-    mobileTarget: '[data-tour="header-mobile-menu"]',
-    view: 'analysis',
-    placement: 'bottom',
-    nextLabel: '下一步',
-    sinceVersion: 1
-  },
-  {
-    id: 'theme-toggle',
-    sectionId: 'overview',
-    sectionTitle: '整体介绍',
-    title: '深色 / 浅色模式',
-    content: '点击这里可在深色与浅色主题之间切换。',
-    target: '[data-tour="header-theme-button"]',
-    mobileTarget: '[data-tour="header-mobile-menu"]',
-    view: 'analysis',
-    placement: 'bottom',
-    nextLabel: '进入日志分析板块',
-    sinceVersion: 1
-  },
-  {
-    id: 'analysis-main',
-    sectionId: 'analysis',
-    sectionTitle: '日志分析',
-    title: '日志分析主区域',
-    content: '这是排查问题的主工作区，任务列表、节点链路和详情都在这里。',
-    target: '[data-tour="analysis-process-root"]',
-    view: 'analysis',
-    placement: 'right',
-    nextLabel: '进入流程图板块',
-    sinceVersion: 1
-  },
-  {
-    id: 'flowchart-main',
-    sectionId: 'flowchart',
-    sectionTitle: '流程图',
-    title: '流程图视图',
-    content: '流程图用于观察节点连接关系、执行路径和关键跳转。',
-    target: '[data-tour="flowchart-main"]',
-    view: 'flowchart',
-    placement: 'left',
-    nextLabel: '下一步',
-    sinceVersion: 1
-  },
-  {
-    id: 'flowchart-playback',
-    sectionId: 'flowchart',
-    sectionTitle: '流程图',
-    title: '流程回放',
-    content: '这里可以顺序回放执行流程，并调整回放速度和聚焦缩放。',
-    target: '[data-tour="flowchart-toolbar"]',
-    view: 'flowchart',
-    placement: 'bottom',
-    nextLabel: '进入文本搜索板块',
-    sinceVersion: 1
-  },
-  {
-    id: 'search-main',
-    sectionId: 'search',
-    sectionTitle: '文本搜索',
-    title: '全文搜索',
-    content: '在这里做关键字或正则检索，快速定位日志片段。',
-    target: '[data-tour="search-main"]',
-    view: 'search',
-    placement: 'left',
-    nextLabel: '进入节点统计板块',
-    sinceVersion: 1
-  },
-  {
-    id: 'statistics-main',
-    sectionId: 'statistics',
-    sectionTitle: '节点统计',
-    title: '节点统计视图',
-    content: '这里用于查看节点耗时、成功率和分布，适合做整体健康度分析。',
-    target: '[data-tour="statistics-main"]',
-    view: 'statistics',
-    placement: 'left',
-    nextLabel: '看分屏模式',
+export const getTutorialSteps = (): TourStep[] => {
+  const t = i18n.global.t
+  return [
+    {
+      id: 'view-switch',
+      sectionId: 'overview',
+      sectionTitle: t('tutorial.section.overview'),
+      title: t('tutorial.step.viewSwitch.title'),
+      content: t('tutorial.step.viewSwitch.content'),
+      target: '[data-tour="header-view-switch"]',
+      mobileTarget: '[data-tour="header-mobile-menu"]',
+      view: 'analysis',
+      placement: 'bottom',
+      nextLabel: t('tutorial.next'),
       sinceVersion: 1
-  },
-  {
-    id: 'split-main',
-    sectionId: 'split',
-    sectionTitle: '分屏模式',
-    title: '分屏模式',
-    content: '这里可以上下分屏，同时查看日志分析和文本搜索，提高对照效率。',
-    target: '[data-tour="split-main"]',
-    view: 'split',
-    placement: 'left',
-    nextLabel: '下一步',
-    sinceVersion: 1
-  },
-  {
-    id: 'tutorial-replay-entry',
-    sectionId: 'ending',
-    sectionTitle: '结束',
-    title: '再次观看教程',
-    content: '以后想重看教程，可以在“关于”里的“快速开始”区域点击“开始新手教程”。',
-    target: '[data-tour="about-start-tutorial"]',
-    view: 'split',
-    placement: 'left',
-    nextLabel: '完成教程',
-    sinceVersion: 2
-  }
-]
+    },
+    {
+      id: 'settings-entry',
+      sectionId: 'overview',
+      sectionTitle: t('tutorial.section.overview'),
+      title: t('tutorial.step.settingsEntry.title'),
+      content: t('tutorial.step.settingsEntry.content'),
+      target: '[data-tour="header-settings-button"]',
+      mobileTarget: '[data-tour="header-mobile-menu"]',
+      view: 'analysis',
+      placement: 'bottom',
+      nextLabel: t('tutorial.next'),
+      sinceVersion: 1
+    },
+    {
+      id: 'theme-toggle',
+      sectionId: 'overview',
+      sectionTitle: t('tutorial.section.overview'),
+      title: t('tutorial.step.themeToggle.title'),
+      content: t('tutorial.step.themeToggle.content'),
+      target: '[data-tour="header-theme-button"]',
+      mobileTarget: '[data-tour="header-mobile-menu"]',
+      view: 'analysis',
+      placement: 'bottom',
+      nextLabel: t('tutorial.step.themeToggle.nextLabel'),
+      sinceVersion: 1
+    },
+    {
+      id: 'analysis-main',
+      sectionId: 'analysis',
+      sectionTitle: t('tutorial.section.analysis'),
+      title: t('tutorial.step.analysisMain.title'),
+      content: t('tutorial.step.analysisMain.content'),
+      target: '[data-tour="analysis-process-root"]',
+      view: 'analysis',
+      placement: 'right',
+      nextLabel: t('tutorial.step.analysisMain.nextLabel'),
+      sinceVersion: 1
+    },
+    {
+      id: 'flowchart-main',
+      sectionId: 'flowchart',
+      sectionTitle: t('tutorial.section.flowchart'),
+      title: t('tutorial.step.flowchartMain.title'),
+      content: t('tutorial.step.flowchartMain.content'),
+      target: '[data-tour="flowchart-main"]',
+      view: 'flowchart',
+      placement: 'left',
+      nextLabel: t('tutorial.next'),
+      sinceVersion: 1
+    },
+    {
+      id: 'flowchart-playback',
+      sectionId: 'flowchart',
+      sectionTitle: t('tutorial.section.flowchart'),
+      title: t('tutorial.step.flowchartPlayback.title'),
+      content: t('tutorial.step.flowchartPlayback.content'),
+      target: '[data-tour="flowchart-toolbar"]',
+      view: 'flowchart',
+      placement: 'bottom',
+      nextLabel: t('tutorial.step.flowchartPlayback.nextLabel'),
+      sinceVersion: 1
+    },
+    {
+      id: 'search-main',
+      sectionId: 'search',
+      sectionTitle: t('tutorial.section.search'),
+      title: t('tutorial.step.searchMain.title'),
+      content: t('tutorial.step.searchMain.content'),
+      target: '[data-tour="search-main"]',
+      view: 'search',
+      placement: 'left',
+      nextLabel: t('tutorial.step.searchMain.nextLabel'),
+      sinceVersion: 1
+    },
+    {
+      id: 'statistics-main',
+      sectionId: 'statistics',
+      sectionTitle: t('tutorial.section.statistics'),
+      title: t('tutorial.step.statisticsMain.title'),
+      content: t('tutorial.step.statisticsMain.content'),
+      target: '[data-tour="statistics-main"]',
+      view: 'statistics',
+      placement: 'left',
+      nextLabel: t('tutorial.step.statisticsMain.nextLabel'),
+      sinceVersion: 1
+    },
+    {
+      id: 'split-main',
+      sectionId: 'split',
+      sectionTitle: t('tutorial.section.split'),
+      title: t('tutorial.step.splitMain.title'),
+      content: t('tutorial.step.splitMain.content'),
+      target: '[data-tour="split-main"]',
+      view: 'split',
+      placement: 'left',
+      nextLabel: t('tutorial.next'),
+      sinceVersion: 1
+    },
+    {
+      id: 'tutorial-replay-entry',
+      sectionId: 'ending',
+      sectionTitle: t('tutorial.section.ending'),
+      title: t('tutorial.step.tutorialReplayEntry.title'),
+      content: t('tutorial.step.tutorialReplayEntry.content'),
+      target: '[data-tour="about-start-tutorial"]',
+      view: 'split',
+      placement: 'left',
+      nextLabel: t('tutorial.step.tutorialReplayEntry.nextLabel'),
+      sinceVersion: 2
+    }
+  ]
+}

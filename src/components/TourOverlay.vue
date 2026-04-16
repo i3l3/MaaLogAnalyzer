@@ -1,7 +1,10 @@
 ﻿<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NButton, NCard, NFlex, NText } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import type { TourStep } from '../tutorial/types'
+
+const { t } = useI18n()
 
 interface RectLike {
   top: number
@@ -34,8 +37,8 @@ const emit = defineEmits<{
 
 const canPrev = computed(() => props.stepIndex > 0)
 const isLast = computed(() => props.stepIndex >= props.totalSteps - 1)
-const prevLabel = computed(() => props.step?.prevLabel || '上一步')
-const nextLabel = computed(() => props.step?.nextLabel || '下一步')
+const prevLabel = computed(() => props.step?.prevLabel || t('tour.prev'))
+const nextLabel = computed(() => props.step?.nextLabel || t('tour.next'))
 
 const viewportWidth = ref(window.innerWidth)
 const viewportHeight = ref(window.innerHeight)
@@ -235,25 +238,25 @@ const cardStyle = computed(() => {
     <n-card v-show="!stepSwitching" class="tour-card" :style="cardStyle" :bordered="false">
       <n-flex vertical style="gap: 10px">
         <n-text depth="3" style="font-size: 12px">
-          板块 {{ sectionIndex }} / {{ sectionTotal }} · {{ sectionTitle || '未分组' }}
+          {{ $t('tour.sectionProgress', { n: sectionIndex, m: sectionTotal, title: sectionTitle || $t('tour.ungrouped') }) }}
         </n-text>
         <n-text depth="3" style="font-size: 12px">
-          板块内步骤 {{ sectionStepIndex }} / {{ sectionStepTotal }} · 总步骤 {{ stepIndex + 1 }} / {{ totalSteps }}
+          {{ $t('tour.stepProgress', { n: sectionStepIndex, m: sectionStepTotal, k: stepIndex + 1, j: totalSteps }) }}
         </n-text>
-        <n-text strong style="font-size: 16px">{{ step?.title || '引导' }}</n-text>
+        <n-text strong style="font-size: 16px">{{ step?.title || $t('tour.guide') }}</n-text>
         <n-text depth="2">{{ step?.content || '' }}</n-text>
 
         <n-text v-if="!targetFound" type="warning" style="font-size: 12px">
-          当前步骤目标还未出现，可重试或先下一步。
+          {{ $t('tour.targetNotFound') }}
         </n-text>
 
         <n-flex justify="space-between" align="center" style="margin-top: 4px; gap: 8px; flex-wrap: wrap">
-          <n-button tertiary @click="emit('skip')">跳过并完成</n-button>
+          <n-button tertiary @click="emit('skip')">{{ $t('tour.skipAndFinish') }}</n-button>
           <n-flex style="gap: 8px; flex-wrap: wrap">
-            <n-button v-if="!targetFound" tertiary @click="emit('retry')">重试定位</n-button>
+            <n-button v-if="!targetFound" tertiary @click="emit('retry')">{{ $t('tour.retry') }}</n-button>
             <n-button :disabled="!canPrev" @click="emit('prev')">{{ prevLabel }}</n-button>
             <n-button v-if="!isLast" type="primary" @click="emit('next')">{{ nextLabel }}</n-button>
-            <n-button v-else type="primary" @click="emit('finish')">完成</n-button>
+            <n-button v-else type="primary" @click="emit('finish')">{{ $t('tour.finish') }}</n-button>
           </n-flex>
         </n-flex>
       </n-flex>

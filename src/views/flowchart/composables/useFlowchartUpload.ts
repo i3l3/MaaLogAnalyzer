@@ -1,10 +1,10 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { isTauri } from '../../../utils/platform'
 import {
   combineLoadedPrimaryLogSegments,
-  PRIMARY_LOG_FILE_HINT,
   selectPrimaryLogGroup,
 } from '../../../utils/logFileDiscovery'
+import { i18n } from '../../../i18n'
 
 interface UseFlowchartUploadOptions {
   onUploadFile: (file: File) => void
@@ -23,10 +23,10 @@ export const useFlowchartUpload = ({
   const fileInputRef = ref<HTMLInputElement | null>(null)
   const folderInputRef = ref<HTMLInputElement | null>(null)
 
-  const uploadOptions = [
-    { label: '选择文件', key: 'file' },
-    { label: '选择文件夹', key: 'folder' },
-  ]
+  const uploadOptions = computed(() => [
+    { label: i18n.global.t('flowchart.selectFile'), key: 'file' },
+    { label: i18n.global.t('flowchart.selectFolder'), key: 'folder' },
+  ])
 
   function emitUploadContent(
     content: string,
@@ -101,7 +101,7 @@ export const useFlowchartUpload = ({
           multiple: false,
           filters: [{ name: 'Log Files', extensions: ['log', 'jsonl', 'txt', 'zip'] }],
           directory: false,
-          title: '选择日志文件',
+          title: i18n.global.t('dialog.selectLogFile'),
         })
         if (!selected) return
         const { readTextFile } = await import('@tauri-apps/plugin-fs')
@@ -144,7 +144,7 @@ export const useFlowchartUpload = ({
 
     const { content, scopedFiles } = await resolveSelectedLogContentFromFiles(files)
     if (!content) {
-      alert(`文件夹中未找到日志文件（${PRIMARY_LOG_FILE_HINT}）`)
+      alert(i18n.global.t('error.logFileNotFound'))
       input.value = ''
       return
     }

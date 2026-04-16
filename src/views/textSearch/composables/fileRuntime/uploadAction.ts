@@ -1,5 +1,6 @@
 import { applyUploadedFileToState } from './applyUploadedFile'
 import { readUploadedFile } from './fileUpload'
+import { i18n } from '../../../../i18n'
 import type { HandleRuntimeFileUploadOptions } from './types'
 
 export const handleRuntimeFileUpload = async (
@@ -25,7 +26,7 @@ export const handleRuntimeFileUpload = async (
       totalLines: options.totalLines,
     }, loadedFile)
   } catch (error) {
-    alert('文件读取失败: ' + error)
+    alert(i18n.global.t('textSearch.fileReadFailed') + error)
   } finally {
     options.isLoadingFile.value = false
   }

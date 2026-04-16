@@ -1,18 +1,19 @@
 import type { NodeNavMatchDetail, NodeNavMatchKind } from './types'
+import { i18n } from '../../../../i18n'
 
 export const formatNodeNavMatchHint = (kinds: NodeNavMatchKind[]): string => {
   const labels = kinds.map((kind) => {
     if (kind === 'next-list') return 'Next'
-    if (kind === 'flow') return '流程'
-    return '节点'
+    if (kind === 'flow') return i18n.global.t('process.flow')
+    return i18n.global.t('process.node')
   })
   return labels.join('/')
 }
 
 const formatNodeNavMatchDetail = (detail: NodeNavMatchDetail): string => {
   if (detail.kind === 'next-list') return `Next: ${detail.text}`
-  if (detail.kind === 'flow') return `流程: ${detail.text}`
-  return `节点: ${detail.text}`
+  if (detail.kind === 'flow') return `${i18n.global.t('process.flowPrefix')}${detail.text}`
+  return `${i18n.global.t('process.nodePrefix')}${detail.text}`
 }
 
 export const formatNodeNavMatchPreview = (details: NodeNavMatchDetail[]): string => {

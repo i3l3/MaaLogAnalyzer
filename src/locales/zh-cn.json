@@ -1,0 +1,245 @@
+{
+  "tutorial": {
+    "section": {
+      "overview": "整体介绍",
+      "analysis": "日志分析",
+      "flowchart": "流程图",
+      "search": "文本搜索",
+      "statistics": "节点统计",
+      "split": "分屏模式",
+      "ending": "结束"
+    },
+    "next": "下一步",
+    "prev": "上一步",
+    "finish": "完成教程",
+    "step": {
+      "viewSwitch": {
+        "title": "切换模式",
+        "content": "这里可以在日志分析、文本搜索、流程图和统计之间切换。"
+      },
+      "settingsEntry": {
+        "title": "设置",
+        "content": "点击这里打开设置面板，调整显示和交互行为。"
+      },
+      "themeToggle": {
+        "title": "深色 / 浅色模式",
+        "content": "点击这里可在深色与浅色主题之间切换。",
+        "nextLabel": "进入日志分析板块"
+      },
+      "analysisMain": {
+        "title": "日志分析主区域",
+        "content": "这是排查问题的主工作区，任务列表、节点链路和详情都在这里。",
+        "nextLabel": "进入流程图板块"
+      },
+      "flowchartMain": {
+        "title": "流程图视图",
+        "content": "流程图用于观察节点连接关系、执行路径和关键跳转。"
+      },
+      "flowchartPlayback": {
+        "title": "流程回放",
+        "content": "这里可以顺序回放执行流程，并调整回放速度和聚焦缩放。",
+        "nextLabel": "进入文本搜索板块"
+      },
+      "searchMain": {
+        "title": "全文搜索",
+        "content": "在这里做关键字或正则检索，快速定位日志片段。",
+        "nextLabel": "进入节点统计板块"
+      },
+      "statisticsMain": {
+        "title": "节点统计视图",
+        "content": "这里用于查看节点耗时、成功率和分布，适合做整体健康度分析。",
+        "nextLabel": "看分屏模式"
+      },
+      "splitMain": {
+        "title": "分屏模式",
+        "content": "这里可以上下分屏，同时查看日志分析和文本搜索，提高对照效率。"
+      },
+      "tutorialReplayEntry": {
+        "title": "再次观看教程",
+        "content": "以后想重看教程，可以在\"关于\"里的\"快速开始\"区域点击\"开始新手教程\"。",
+        "nextLabel": "完成教程"
+      }
+    }
+  },
+  "status": {
+    "success": "成功",
+    "running": "运行中",
+    "failed": "失败"
+  },
+  "error": {
+    "unknown": "未知错误",
+    "openFileFailed": "打开文件失败: ",
+    "readFileFailed": "读取文件失败: ",
+    "saveFailed": "保存失败: ",
+    "openFolderFailed": "打开文件夹失败: ",
+    "folderSelectNotSupported": "您的浏览器不支持文件夹选择功能，请使用 Chrome/Edge 等现代浏览器",
+    "debugFolderNotFound": "未找到debug文件夹或日志文件",
+    "logFileNotFound": "未找到日志文件"
+  },
+  "dialog": {
+    "selectLogFile": "选择日志文件",
+    "selectLogFolder": "选择日志文件夹"
+  },
+  "tour": {
+    "prev": "上一步",
+    "next": "下一步",
+    "ungrouped": "未分组",
+    "guide": "引导",
+    "targetNotFound": "当前步骤目标还未出现，可重试或先下一步。",
+    "skipAndFinish": "跳过并完成",
+    "retry": "重试定位",
+    "finish": "完成",
+    "sectionProgress": "板块 {n} / {m} · {title}",
+    "stepProgress": "板块内步骤 {n} / {m} · 总步骤 {k} / {j}"
+  },
+  "recognition": {
+    "roundSeparator": "—— 第 {n} 轮 ——"
+  },
+  "settings": {
+    "save": "保存设置",
+    "resetDefault": "恢复默认",
+    "savedMessage": "设置已保存",
+    "resetMessage": "已恢复默认设置",
+    "speed": {
+      "slow": "慢速 1500ms",
+      "standard": "标准 900ms",
+      "fast": "快速 600ms",
+      "ultraFast": "极速 350ms"
+    },
+    "flowchart": {
+      "title": "流程图",
+      "edgeStyle": "连线方式",
+      "orthogonal": "避障折线",
+      "smooth": "平滑曲线",
+      "edgeFlow": "连线流动动画",
+      "relayout": "拖动后自动重排",
+      "ignoreUnexecuted": "忽略未经过节点",
+      "playbackSpeed": "回放速度",
+      "focusZoom": "聚焦缩放"
+    },
+    "logAnalysis": {
+      "title": "日志分析",
+      "displayMode": "节点显示模式",
+      "detailed": "详细",
+      "compact": "紧凑",
+      "tree": "树形",
+      "showUnrecognized": "显示未识别节点",
+      "collapseRootRecognition": "默认折叠根部识别列表",
+      "collapseRootAction": "默认折叠根部动作列表",
+      "collapseNestedRecognition": "默认折叠嵌套识别节点",
+      "collapseNestedAction": "默认折叠嵌套动作节点",
+      "expandRawJson": "默认展开原始 JSON 数据"
+    }
+  },
+  "flowchart": {
+    "selectFile": "选择文件",
+    "selectFolder": "选择文件夹",
+    "toolbar": {
+      "task": "任务:",
+      "selectTask": "选择任务",
+      "open": "打开"
+    },
+    "popover": {
+      "showAbnormalOnly": "仅显示异常执行（点击显示全部）",
+      "showAll": "显示全部执行（点击仅异常）",
+      "noAbnormal": "暂无异常执行",
+      "execution": "执行 #{n}",
+      "locate": "定位",
+      "recognition": "识别",
+      "action": "动作",
+      "success": "成功",
+      "failed": "失败"
+    }
+  },
+  "nodeStats": {
+    "nodeDetails": "节点明细",
+    "recognitionActionDetails": "识别 / 动作明细",
+    "title": "节点性能统计",
+    "nodeMode": "节点统计",
+    "recognitionActionMode": "识别 / 动作",
+    "nodeModeDesc": "聚合查看频次、耗时和稳定性，适合先找最慢热点。",
+    "recognitionActionModeDesc": "拆分识别与动作阶段，适合判断瓶颈更偏向哪一段。",
+    "chart": {
+      "count": "执行次数",
+      "totalDuration": "总耗时",
+      "avgDuration": "平均耗时",
+      "maxDuration": "最大耗时",
+      "avgRecognitionDuration": "平均识别耗时",
+      "maxRecognitionDuration": "最大识别耗时",
+      "avgActionDuration": "平均动作耗时",
+      "maxActionDuration": "最大动作耗时",
+      "avgRecognitionAttempts": "平均识别尝试"
+    },
+    "columns": {
+      "nodeName": "节点名称",
+      "count": "次数",
+      "execCount": "执行次数",
+      "avgDuration": "平均耗时",
+      "minDuration": "最小耗时",
+      "maxDuration": "最大耗时",
+      "totalDuration": "总耗时",
+      "successRate": "成功率",
+      "successFailed": "成功/失败",
+      "recognitionDuration": "识别耗时",
+      "actionDuration": "动作耗时",
+      "avgRecognitionAttempts": "平均识别尝试",
+      "avgRecognitionDuration": "平均识别耗时",
+      "maxRecognitionDuration": "最大识别耗时",
+      "avgActionDuration": "平均动作耗时",
+      "maxActionDuration": "最大动作耗时"
+    }
+  },
+  "textSearch": {
+    "fileReadFailed": "文件读取失败: ",
+    "loadContextFailed": "加载上下文失败: ",
+    "loadedTarget": "已加载目标",
+    "manualSelectFile": "手动选择文件",
+    "searchFailed": "搜索失败: ",
+    "selectLoadedTargetFirst": "请先选择已加载目标文件",
+    "selectFileFirst": "请先选择文件",
+    "title": "文本搜索",
+    "toolbar": {
+      "controlsLabel": "已加载目标 / 选择文件 / 搜索选项",
+      "selectOtherFile": "选择其它文件",
+      "selectLoadedTarget": "选择已加载目标"
+    },
+    "caseSensitive": "区分大小写",
+    "regex": "正则",
+    "hideDebug": "隐藏调试",
+    "linesSuffix": "行",
+    "loading": "正在加载文件...",
+    "showingLines": "显示行 {n} - {m}",
+    "totalLines": "共 {n} 行",
+    "currentLine": "▶ 第 {n} 行",
+    "largeFileInfo": "📦 大文件信息",
+    "fileContent": "📄 文件内容",
+    "hideContent": "隐藏内容",
+    "showContent": "显示内容",
+    "loadFileFirst": "请先加载文件",
+    "clickToShowContent": "点击右上角显示文件内容",
+    "fileLoaded": "文件已加载 ({n} 行)，点击搜索结果会自动显示",
+    "largeFileMode": "大文件流式模式",
+    "search": "搜索",
+    "loadingEllipsis": "加载中...",
+    "searchResultsTitle": "📋 搜索结果",
+    "searchResults": "搜索结果",
+    "enterSearchContent": "请输入搜索内容",
+    "enterSearchAndClick": "请输入搜索内容并点击搜索"
+  },
+  "process": {
+    "jumpbackKeyword": "跳回",
+    "anchorKeyword": "锚点",
+    "unnamedNode": "未命名节点",
+    "flow": "流程",
+    "node": "节点",
+    "flowPrefix": "流程: ",
+    "nodePrefix": "节点: ",
+    "noNodeData": "暂无节点数据",
+    "noRootNodeData": "暂无根层节点数据"
+  },
+  "lang": {
+    "zh": "中文",
+    "en": "English",
+    "ko": "한국어"
+  }
+}

@@ -1,4 +1,5 @@
 import type { NodeInfo } from '../types'
+import { i18n } from '../i18n'
 
 export type RuntimeStatus = NodeInfo['status']
 export type RuntimeStatusTagType = 'default' | 'success' | 'warning' | 'error' | 'info'
@@ -10,9 +11,10 @@ interface RuntimeStatusTagTypeOptions {
 }
 
 export const getRuntimeStatusText = (status: RuntimeStatus): string => {
-  if (status === 'success') return '成功'
-  if (status === 'running') return '运行中'
-  return '失败'
+  const t = i18n.global.t
+  if (status === 'success') return t('status.success')
+  if (status === 'running') return t('status.running')
+  return t('status.failed')
 }
 
 export const getRuntimeStatusTagType = (

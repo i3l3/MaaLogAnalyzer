@@ -176,7 +176,7 @@ defineExpose({
       </dynamic-scroller>
       <n-empty
         v-else
-        :description="props.currentNodesLength > 0 ? props.emptyDescription : '暂无节点数据'"
+        :description="props.currentNodesLength > 0 ? props.emptyDescription : $t('process.noNodeData')"
         style="padding: 24px 0"
       />
     </div>

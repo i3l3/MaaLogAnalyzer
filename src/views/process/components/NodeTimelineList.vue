@@ -3,7 +3,6 @@ import { NEmpty } from 'naive-ui'
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
 import type { NodeInfo } from '../../../types'
 import NodeCard from '../../../components/NodeCard.vue'
-
 type NodeTimelineItem = NodeInfo & {
   _uniqueKey: string
 }
@@ -54,7 +53,7 @@ const handleWheel = (event: WheelEvent) => {
 <template>
   <div :style="wrapperStyle" @wheel.capture.passive="handleWheel">
     <div v-if="nodes.length === 0" style="padding: 40px 0">
-      <n-empty description="暂无节点数据" />
+      <n-empty :description="$t('process.noNodeData')" />
     </div>
     <DynamicScroller
       v-else

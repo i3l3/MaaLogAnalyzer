@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NFlex, NText, NTag } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import type {
   NodeNavMode,
   NodeNavStatus,
@@ -8,6 +9,8 @@ import type {
 } from '../composables/useNodeNavSearch'
 import { extractTime } from '../../../utils/formatDuration'
 import { getRuntimeStatusTagType, getRuntimeStatusText } from '../../../utils/runtimeStatus'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   item: NodeNavViewItem
@@ -44,7 +47,7 @@ const getNodeNavStatusTagType = (status: NodeNavStatus) => {
 <template>
   <n-flex v-if="displayMode === 'detailed'" vertical style="gap: 4px">
     <n-flex align="center" style="gap: 8px">
-      <n-text strong style="font-size: 13px">{{ item.primaryText || '未命名节点' }}</n-text>
+      <n-text strong style="font-size: 13px">{{ item.primaryText || t('process.unnamedNode') }}</n-text>
       <n-text depth="3" style="font-size: 11px">
         {{ extractTime(item.node.ts) }}
       </n-text>
@@ -77,7 +80,7 @@ const getNodeNavStatusTagType = (status: NodeNavStatus) => {
     <n-flex align="center" :style="{ gap: displayMode === 'compact' ? '6px' : '4px' }">
       <span class="nav-status-dot" :class="getNodeNavDotClass(item.navStatus)" />
       <n-text style="font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
-        {{ item.primaryText || '未命名节点' }}
+        {{ item.primaryText || t('process.unnamedNode') }}
       </n-text>
       <n-tag
         v-if="showMatchDetails"
