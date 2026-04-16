@@ -1,16 +1,19 @@
+import { computed } from 'vue'
 import { useMessage } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import { getSettings, saveSettings, getDefaultSettings } from '../../../utils/settings'
 
 export const useSettingsState = () => {
   const message = useMessage()
+  const { t } = useI18n()
   const settings = getSettings()
 
-  const playbackSpeedOptions = [
-    { label: '慢速 1500ms', value: 1500 },
-    { label: '标准 900ms', value: 900 },
-    { label: '快速 600ms', value: 600 },
-    { label: '极速 350ms', value: 350 },
-  ]
+  const playbackSpeedOptions = computed(() => [
+    { label: t('settings.speed.slow'), value: 1500 },
+    { label: t('settings.speed.standard'), value: 900 },
+    { label: t('settings.speed.fast'), value: 600 },
+    { label: t('settings.speed.ultraFast'), value: 350 },
+  ])
 
   const focusZoomOptions = [
     { label: '0.8x', value: 0.8 },
@@ -22,13 +25,13 @@ export const useSettingsState = () => {
 
   const handleSave = () => {
     saveSettings(settings)
-    message.success('设置已保存')
+    message.success(t('settings.savedMessage'))
   }
 
   const handleReset = () => {
     Object.assign(settings, getDefaultSettings())
     saveSettings(settings)
-    message.success('已恢复默认设置')
+    message.success(t('settings.resetMessage'))
   }
 
   return {

@@ -1,0 +1,245 @@
+{
+  "tutorial": {
+    "section": {
+      "overview": "Overview",
+      "analysis": "Log Analysis",
+      "flowchart": "Flowchart",
+      "search": "Text Search",
+      "statistics": "Node Statistics",
+      "split": "Split View",
+      "ending": "End"
+    },
+    "next": "Next",
+    "prev": "Previous",
+    "finish": "Complete Tutorial",
+    "step": {
+      "viewSwitch": {
+        "title": "Switch Mode",
+        "content": "Here you can switch between Log Analysis, Text Search, Flowchart, and Statistics."
+      },
+      "settingsEntry": {
+        "title": "Settings",
+        "content": "Click here to open the settings panel to adjust display and interaction behavior."
+      },
+      "themeToggle": {
+        "title": "Dark / Light Mode",
+        "content": "Click here to switch between dark and light themes.",
+        "nextLabel": "Go to Log Analysis"
+      },
+      "analysisMain": {
+        "title": "Main Log Analysis Area",
+        "content": "This is the main workspace for troubleshooting. Task list, node chain, and details are all here.",
+        "nextLabel": "Go to Flowchart"
+      },
+      "flowchartMain": {
+        "title": "Flowchart View",
+        "content": "The flowchart is used to observe node connections, execution paths, and key jumps."
+      },
+      "flowchartPlayback": {
+        "title": "Flow Replay",
+        "content": "Here you can replay the execution flow in sequence and adjust playback speed and focus zoom.",
+        "nextLabel": "Go to Text Search"
+      },
+      "searchMain": {
+        "title": "Full-text Search",
+        "content": "Here you can do keyword or regex search to quickly locate log fragments.",
+        "nextLabel": "Go to Node Statistics"
+      },
+      "statisticsMain": {
+        "title": "Node Statistics View",
+        "content": "Here you can view node duration, success rate, and distribution, suitable for overall health analysis.",
+        "nextLabel": "See Split View"
+      },
+      "splitMain": {
+        "title": "Split View",
+        "content": "Here you can split the screen vertically to view Log Analysis and Text Search simultaneously for better comparison."
+      },
+      "tutorialReplayEntry": {
+        "title": "Watch Tutorial Again",
+        "content": "To watch the tutorial again later, click \"Start Tutorial\" in the \"Quick Start\" section in \"About\".",
+        "nextLabel": "Complete Tutorial"
+      }
+    }
+  },
+  "status": {
+    "success": "Success",
+    "running": "Running",
+    "failed": "Failed"
+  },
+  "error": {
+    "unknown": "Unknown error",
+    "openFileFailed": "Failed to open file: ",
+    "readFileFailed": "Failed to read file: ",
+    "saveFailed": "Save failed: ",
+    "openFolderFailed": "Failed to open folder: ",
+    "folderSelectNotSupported": "Your browser does not support folder selection. Please use a modern browser like Chrome/Edge.",
+    "debugFolderNotFound": "debug folder or log file not found",
+    "logFileNotFound": "Log file not found"
+  },
+  "dialog": {
+    "selectLogFile": "Select Log File",
+    "selectLogFolder": "Select Log Folder"
+  },
+  "tour": {
+    "prev": "Previous",
+    "next": "Next",
+    "ungrouped": "Ungrouped",
+    "guide": "Guide",
+    "targetNotFound": "The target for the current step has not appeared yet. You can retry or proceed to the next step.",
+    "skipAndFinish": "Skip & Finish",
+    "retry": "Retry Locate",
+    "finish": "Finish",
+    "sectionProgress": "Section {n} / {m} · {title}",
+    "stepProgress": "Section step {n} / {m} · Total step {k} / {j}"
+  },
+  "recognition": {
+    "roundSeparator": "—— Round {n} ——"
+  },
+  "settings": {
+    "save": "Save Settings",
+    "resetDefault": "Reset to Default",
+    "savedMessage": "Settings saved",
+    "resetMessage": "Default settings restored",
+    "speed": {
+      "slow": "Slow 1500ms",
+      "standard": "Standard 900ms",
+      "fast": "Fast 600ms",
+      "ultraFast": "Ultra-fast 350ms"
+    },
+    "flowchart": {
+      "title": "Flowchart",
+      "edgeStyle": "Connection Style",
+      "orthogonal": "Orthogonal",
+      "smooth": "Smooth Curve",
+      "edgeFlow": "Connection Flow Animation",
+      "relayout": "Auto Re-layout After Drag",
+      "ignoreUnexecuted": "Ignore Unvisited Nodes",
+      "playbackSpeed": "Playback Speed",
+      "focusZoom": "Focus Zoom"
+    },
+    "logAnalysis": {
+      "title": "Log Analysis",
+      "displayMode": "Node Display Mode",
+      "detailed": "Detailed",
+      "compact": "Compact",
+      "tree": "Tree",
+      "showUnrecognized": "Show Unrecognized Nodes",
+      "collapseRootRecognition": "Default Collapse Root Recognition List",
+      "collapseRootAction": "Default Collapse Root Action List",
+      "collapseNestedRecognition": "Default Collapse Nested Recognition Nodes",
+      "collapseNestedAction": "Default Collapse Nested Action Nodes",
+      "expandRawJson": "Default Expand Raw JSON Data"
+    }
+  },
+  "flowchart": {
+    "selectFile": "Select File",
+    "selectFolder": "Select Folder",
+    "toolbar": {
+      "task": "Task:",
+      "selectTask": "Select Task",
+      "open": "Open"
+    },
+    "popover": {
+      "showAbnormalOnly": "Show Abnormal Only (Click to Show All)",
+      "showAll": "Show All Executions (Click for Abnormal Only)",
+      "noAbnormal": "No Abnormal Executions",
+      "execution": "Execution #{n}",
+      "locate": "Locate",
+      "recognition": "Recognition",
+      "action": "Action",
+      "success": "Success",
+      "failed": "Failed"
+    }
+  },
+  "nodeStats": {
+    "nodeDetails": "Node Details",
+    "recognitionActionDetails": "Recognition / Action Details",
+    "title": "Node Performance Statistics",
+    "nodeMode": "Node Statistics",
+    "recognitionActionMode": "Recognition / Action",
+    "nodeModeDesc": "Aggregated view of frequency, duration, and stability; best for finding the slowest hotspots first.",
+    "recognitionActionModeDesc": "Split recognition and action phases; suitable for determining which phase is the bottleneck.",
+    "chart": {
+      "count": "Exec Count",
+      "totalDuration": "Total Duration",
+      "avgDuration": "Avg Duration",
+      "maxDuration": "Max Duration",
+      "avgRecognitionDuration": "Avg Recognition Duration",
+      "maxRecognitionDuration": "Max Recognition Duration",
+      "avgActionDuration": "Avg Action Duration",
+      "maxActionDuration": "Max Action Duration",
+      "avgRecognitionAttempts": "Avg Recognition Attempts"
+    },
+    "columns": {
+      "nodeName": "Node Name",
+      "count": "Count",
+      "execCount": "Exec Count",
+      "avgDuration": "Avg Duration",
+      "minDuration": "Min Duration",
+      "maxDuration": "Max Duration",
+      "totalDuration": "Total Duration",
+      "successRate": "Success Rate",
+      "successFailed": "Success/Failed",
+      "recognitionDuration": "Reco Duration",
+      "actionDuration": "Action Duration",
+      "avgRecognitionAttempts": "Avg Reco Attempts",
+      "avgRecognitionDuration": "Avg Reco Duration",
+      "maxRecognitionDuration": "Max Reco Duration",
+      "avgActionDuration": "Avg Action Duration",
+      "maxActionDuration": "Max Action Duration"
+    }
+  },
+  "textSearch": {
+    "fileReadFailed": "Failed to read file: ",
+    "loadContextFailed": "Failed to load context: ",
+    "loadedTarget": "Loaded Target",
+    "manualSelectFile": "Manually Select File",
+    "searchFailed": "Search failed: ",
+    "selectLoadedTargetFirst": "Please select a loaded target file first",
+    "selectFileFirst": "Please select a file first",
+    "title": "Text Search",
+    "toolbar": {
+      "controlsLabel": "Loaded Target / Select File / Search Options",
+      "selectOtherFile": "Select Other File",
+      "selectLoadedTarget": "Select Loaded Target"
+    },
+    "caseSensitive": "Case Sensitive",
+    "regex": "Regex",
+    "hideDebug": "Hide Debug",
+    "linesSuffix": "lines",
+    "loading": "Loading file...",
+    "showingLines": "Showing lines {n} - {m}",
+    "totalLines": "{n} lines total",
+    "currentLine": "▶ Line {n}",
+    "largeFileInfo": "📦 Large File Info",
+    "fileContent": "📄 File Content",
+    "hideContent": "Hide Content",
+    "showContent": "Show Content",
+    "loadFileFirst": "Please load a file first",
+    "clickToShowContent": "Click the top-right button to show file content",
+    "fileLoaded": "File loaded ({n} lines). Click search results to display automatically.",
+    "largeFileMode": "Large File Streaming Mode",
+    "search": "Search",
+    "loadingEllipsis": "Loading...",
+    "searchResultsTitle": "📋 Search Results",
+    "searchResults": "Search Results",
+    "enterSearchContent": "Please enter search content",
+    "enterSearchAndClick": "Please enter search content and click Search"
+  },
+  "process": {
+    "jumpbackKeyword": "jumpback",
+    "anchorKeyword": "anchor",
+    "unnamedNode": "Unnamed Node",
+    "flow": "Flow",
+    "node": "Node",
+    "flowPrefix": "Flow: ",
+    "nodePrefix": "Node: ",
+    "noNodeData": "No node data",
+    "noRootNodeData": "No root-level node data"
+  },
+  "lang": {
+    "zh": "中文",
+    "en": "English",
+    "ko": "한국어"
+  }
+}

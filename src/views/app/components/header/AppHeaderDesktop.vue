@@ -10,8 +10,10 @@ import {
   InfoCircleOutlined,
   BulbFilled,
   BulbOutlined,
+  GlobalOutlined,
 } from '@vicons/antd'
 import { isVSCode } from '../../../../utils/platform'
+import { setLocale, type SupportedLocale } from '../../../../i18n'
 
 defineProps<{
   currentViewLabel: string
@@ -33,6 +35,16 @@ const handleViewModeSelect = (key: string | number) => {
 }
 
 const isNativeVSCodeHost = isVSCode()
+
+const langOptions = [
+  { label: '中文', key: 'zh-cn' },
+  { label: 'English', key: 'en' },
+  { label: '한국어', key: 'ko' },
+]
+
+const handleLangSelect = (key: string) => {
+  setLocale(key as SupportedLocale)
+}
 </script>
 
 <template>
@@ -63,6 +75,14 @@ const isNativeVSCodeHost = isVSCode()
     </n-flex>
 
     <n-flex align="center" style="gap: 8px">
+      <n-dropdown :options="langOptions" @select="handleLangSelect" trigger="click">
+        <n-button text style="font-size: 20px">
+          <n-icon>
+            <global-outlined />
+          </n-icon>
+        </n-button>
+      </n-dropdown>
+
       <n-button
         text
         style="font-size: 20px"

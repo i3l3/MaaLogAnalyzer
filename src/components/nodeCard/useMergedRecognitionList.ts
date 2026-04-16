@@ -6,6 +6,7 @@ import {
   buildRecognitionTargetByNextName,
   resolveRecognitionNextListName,
 } from '@windsland52/maa-log-tools/next-list-presentation'
+import { i18n } from '../../i18n'
 
 interface UseMergedRecognitionListParams {
   node: Ref<NodeInfo>
@@ -120,7 +121,7 @@ const appendRoundItems = (
 ) => {
   if (useRoundSeparator) {
     result.push({
-      name: `—— 第 ${roundIdx + 1} 轮 ——`,
+      name: i18n.global.t('recognition.roundSeparator', { n: roundIdx + 1 }),
       status: 'not-recognized',
       isRoundSeparator: true,
       roundIndex: roundIdx + 1,

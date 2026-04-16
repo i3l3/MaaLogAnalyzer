@@ -1,3 +1,5 @@
+import { i18n } from '../../../../i18n'
+
 export type NodeChartDimension = 'count' | 'totalDuration' | 'avgDuration' | 'maxDuration'
 export type RecognitionActionChartDimension =
   | 'avgRecognitionDuration'
@@ -7,16 +9,16 @@ export type RecognitionActionChartDimension =
   | 'avgRecognitionAttempts'
 
 export const nodeChartDimensionOptions = [
-  { label: '执行次数', value: 'count' },
-  { label: '总耗时', value: 'totalDuration' },
-  { label: '平均耗时', value: 'avgDuration' },
-  { label: '最大耗时', value: 'maxDuration' },
+  { label: i18n.global.t('nodeStats.chart.count'), value: 'count' },
+  { label: i18n.global.t('nodeStats.chart.totalDuration'), value: 'totalDuration' },
+  { label: i18n.global.t('nodeStats.chart.avgDuration'), value: 'avgDuration' },
+  { label: i18n.global.t('nodeStats.chart.maxDuration'), value: 'maxDuration' },
 ]
 
 export const recognitionActionChartDimensionOptions = [
-  { label: '平均识别耗时', value: 'avgRecognitionDuration' },
-  { label: '最大识别耗时', value: 'maxRecognitionDuration' },
-  { label: '平均动作耗时', value: 'avgActionDuration' },
-  { label: '最大动作耗时', value: 'maxActionDuration' },
-  { label: '平均识别尝试', value: 'avgRecognitionAttempts' },
+  { label: i18n.global.t('nodeStats.chart.avgRecognitionDuration'), value: 'avgRecognitionDuration' },
+  { label: i18n.global.t('nodeStats.chart.maxRecognitionDuration'), value: 'maxRecognitionDuration' },
+  { label: i18n.global.t('nodeStats.chart.avgActionDuration'), value: 'avgActionDuration' },
+  { label: i18n.global.t('nodeStats.chart.maxActionDuration'), value: 'maxActionDuration' },
+  { label: i18n.global.t('nodeStats.chart.avgRecognitionAttempts'), value: 'avgRecognitionAttempts' },
 ]

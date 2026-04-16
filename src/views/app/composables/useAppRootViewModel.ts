@@ -3,7 +3,7 @@ import { version } from '../../../../package.json'
 import { getErrorMessage } from '../../../utils/errorHandler'
 import { useIsMobile } from '../../../composables/useIsMobile'
 import { buildNodeFlowItems, buildNodeRecognitionFlowItems } from '@windsland52/maa-log-parser/node-flow'
-import { TOUR_STEPS, TOUR_STORAGE_KEY, TOUR_VERSION } from '../../../tutorial/steps'
+import { getTutorialSteps, TOUR_STORAGE_KEY, TOUR_VERSION } from '../../../tutorial/steps'
 import type { NodeInfo, TaskInfo } from '../../../types'
 import { LogParser } from '@windsland52/maa-log-parser'
 import { BRIDGE_THEME_UPDATED_EVENT } from '../../../utils/bridgeEvents'
@@ -196,7 +196,7 @@ export const useAppRootViewModel = ({
     setDeferredTextSearchTargets,
     pickPreferredLogTargetId,
     applyParsedTasks,
-    steps: TOUR_STEPS,
+    steps: getTutorialSteps(),
     isMobile,
     viewMode,
     showAboutModal,

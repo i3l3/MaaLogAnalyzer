@@ -11,6 +11,7 @@ import {
   formatNodeNavMatchPreview,
 } from './nodeNavSearch/format'
 import { buildNodeExecutionTimeline } from '@windsland52/maa-log-tools/node-execution-timeline'
+import { i18n } from '../../../i18n'
 import type {
   NodeNavStatus,
   NodeNavViewItem,
@@ -53,7 +54,7 @@ export const useNodeNavSearch = (
     return currentNodes.value.map((node, originalIndex) => ({
       node,
       originalIndex,
-      primaryText: node.name || '未命名节点',
+      primaryText: node.name || i18n.global.t('process.unnamedNode'),
       primaryMatchKind: 'node',
       navStatus: node.status,
     }))
@@ -124,16 +125,16 @@ export const useNodeNavSearch = (
   })
 
   const nodeNavEmptyDescription = computed(() => {
-    if (currentNodes.value.length === 0) return '暂无节点数据'
+    if (currentNodes.value.length === 0) return i18n.global.t('process.noNodeData')
     if (nodeNavMode.value === 'next-list-hit') {
-      if (rootTaskEntries.value.length === 0) return '暂无根层节点数据'
+      if (rootTaskEntries.value.length === 0) return i18n.global.t('process.noRootNodeData')
       if (recognitionEntries.value.length === 0) return '暂无识别模式节点'
     }
     if (normalizedNodeNavSearchText.value) return '未找到匹配节点'
     if (nodeNavFailedOnly.value) {
       return nodeNavMode.value === 'pipeline' ? '暂无失败节点' : '暂无异常状态节点'
     }
-    return '暂无节点数据'
+    return i18n.global.t('process.noNodeData')
   })
 
   const setNodeNavMode = (mode: NodeNavMode) => {

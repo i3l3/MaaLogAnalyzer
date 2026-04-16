@@ -1,4 +1,5 @@
 import { readContextLinesFromFile } from './contextRead'
+import { i18n } from '../../../../i18n'
 import type { LoadContextLinesOptions } from './types'
 
 export const loadContextLinesForRuntime = async (
@@ -16,6 +17,6 @@ export const loadContextLinesForRuntime = async (
     options.contextLines.value = lines
     options.contextStartLine.value = startLine
   } catch (error) {
-    alert('加载上下文失败: ' + error)
+    alert(i18n.global.t('textSearch.loadContextFailed') + error)
   }
 }

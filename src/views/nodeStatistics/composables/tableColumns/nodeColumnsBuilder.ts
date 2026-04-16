@@ -1,20 +1,21 @@
 import type { DataTableColumns } from 'naive-ui'
 import type { NodeStatistics } from '@windsland52/maa-log-parser/node-statistics'
 import { formatDuration } from '../../../../utils/formatDuration'
+import { i18n } from '../../../../i18n'
 import { renderNodeStatusTags, renderSuccessRateProgress } from './renderers'
 
 export const buildNodeColumns = (isMobile: boolean): DataTableColumns<NodeStatistics> => {
   if (isMobile) {
     return [
       {
-        title: '节点名称',
+        title: i18n.global.t('nodeStats.columns.nodeName'),
         key: 'name',
         width: 150,
         ellipsis: { tooltip: true },
         render: (row) => row.name,
       },
       {
-        title: '次数',
+        title: i18n.global.t('nodeStats.columns.count'),
         key: 'count',
         width: 60,
         align: 'center',
@@ -22,7 +23,7 @@ export const buildNodeColumns = (isMobile: boolean): DataTableColumns<NodeStatis
         render: (row) => row.count,
       },
       {
-        title: '平均耗时',
+        title: i18n.global.t('nodeStats.columns.avgDuration'),
         key: 'avgDuration',
         width: 90,
         align: 'right',
@@ -31,7 +32,7 @@ export const buildNodeColumns = (isMobile: boolean): DataTableColumns<NodeStatis
         render: (row) => formatDuration(row.avgDuration),
       },
       {
-        title: '成功率',
+        title: i18n.global.t('nodeStats.columns.successRate'),
         key: 'successRate',
         width: 80,
         align: 'center',
@@ -43,14 +44,14 @@ export const buildNodeColumns = (isMobile: boolean): DataTableColumns<NodeStatis
 
   return [
     {
-      title: '节点名称',
+      title: i18n.global.t('nodeStats.columns.nodeName'),
       key: 'name',
       width: 250,
       ellipsis: { tooltip: true },
       render: (row) => row.name,
     },
     {
-      title: '执行次数',
+      title: i18n.global.t('nodeStats.columns.execCount'),
       key: 'count',
       width: 100,
       align: 'center',
@@ -58,7 +59,7 @@ export const buildNodeColumns = (isMobile: boolean): DataTableColumns<NodeStatis
       render: (row) => row.count,
     },
     {
-      title: '平均耗时',
+      title: i18n.global.t('nodeStats.columns.avgDuration'),
       key: 'avgDuration',
       width: 100,
       align: 'right',
@@ -67,7 +68,7 @@ export const buildNodeColumns = (isMobile: boolean): DataTableColumns<NodeStatis
       render: (row) => formatDuration(row.avgDuration),
     },
     {
-      title: '最小耗时',
+      title: i18n.global.t('nodeStats.columns.minDuration'),
       key: 'minDuration',
       width: 100,
       align: 'right',
@@ -75,7 +76,7 @@ export const buildNodeColumns = (isMobile: boolean): DataTableColumns<NodeStatis
       render: (row) => formatDuration(row.minDuration),
     },
     {
-      title: '最大耗时',
+      title: i18n.global.t('nodeStats.columns.maxDuration'),
       key: 'maxDuration',
       width: 100,
       align: 'right',
@@ -83,7 +84,7 @@ export const buildNodeColumns = (isMobile: boolean): DataTableColumns<NodeStatis
       render: (row) => formatDuration(row.maxDuration),
     },
     {
-      title: '总耗时',
+      title: i18n.global.t('nodeStats.columns.totalDuration'),
       key: 'totalDuration',
       width: 100,
       align: 'right',
@@ -91,7 +92,7 @@ export const buildNodeColumns = (isMobile: boolean): DataTableColumns<NodeStatis
       render: (row) => formatDuration(row.totalDuration),
     },
     {
-      title: '成功率',
+      title: i18n.global.t('nodeStats.columns.successRate'),
       key: 'successRate',
       width: 120,
       align: 'center',
@@ -99,7 +100,7 @@ export const buildNodeColumns = (isMobile: boolean): DataTableColumns<NodeStatis
       render: (row) => renderSuccessRateProgress(row.successRate),
     },
     {
-      title: '成功/失败',
+      title: i18n.global.t('nodeStats.columns.successFailed'),
       key: 'status',
       width: 120,
       align: 'center',

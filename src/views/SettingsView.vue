@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { NCard, NButton, NFlex } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import { useSettingsState } from './settings/composables/useSettingsState'
 import LogAnalysisSettingsCard from './settings/components/LogAnalysisSettingsCard.vue'
 import FlowchartSettingsCard from './settings/components/FlowchartSettingsCard.vue'
 
+const { t } = useI18n()
 const {
   settings,
   playbackSpeedOptions,
@@ -23,8 +25,8 @@ const {
     />
 
     <n-flex style="margin-top: 24px; gap: 12px">
-      <n-button type="primary" @click="handleSave">保存设置</n-button>
-      <n-button @click="handleReset">恢复默认</n-button>
+      <n-button type="primary" @click="handleSave">{{ t('settings.save') }}</n-button>
+      <n-button @click="handleReset">{{ t('settings.resetDefault') }}</n-button>
     </n-flex>
   </n-card>
 </template>

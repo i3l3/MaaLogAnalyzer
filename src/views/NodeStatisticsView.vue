@@ -8,6 +8,7 @@ import {
 import {
   NCard, NTag, useMessage,
 } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import type { TaskInfo } from '../types'
 import { useIsMobile } from '../composables/useIsMobile'
 import { useNodeStatisticsDataSource } from './nodeStatistics/composables/useNodeStatisticsDataSource'
@@ -30,6 +31,7 @@ import NodeStatisticsChartCard from './nodeStatistics/components/NodeStatisticsC
 
 
 const { isMobile } = useIsMobile()
+const { t } = useI18n()
 
 const props = defineProps<{
   tasks: TaskInfo[]
@@ -89,7 +91,7 @@ const {
 })
 
 const statisticsPanelTitle = computed(() => (
-  statMode.value === 'node' ? '节点明细' : '识别 / 动作明细'
+  statMode.value === 'node' ? t('nodeStats.nodeDetails') : t('nodeStats.recognitionActionDetails')
 ))
 
 const activeChartOption = computed(() => (
@@ -165,15 +167,15 @@ onBeforeUnmount(() => {
       <div class="statistics-header">
         <div class="statistics-title-block">
           <div class="statistics-title-row">
-            <div class="statistics-title">节点性能统计</div>
+            <div class="statistics-title">{{ t('nodeStats.title') }}</div>
             <n-tag size="small" round :type="statMode === 'node' ? 'info' : 'warning'">
-              {{ statMode === 'node' ? '节点统计' : '识别 / 动作' }}
+              {{ statMode === 'node' ? t('nodeStats.nodeMode') : t('nodeStats.recognitionActionMode') }}
             </n-tag>
           </div>
           <div class="statistics-subtitle">
             {{ statMode === 'node'
-              ? '聚合查看频次、耗时和稳定性，适合先找最慢热点。'
-              : '拆分识别与动作阶段，适合判断瓶颈更偏向哪一段。' }}
+              ? t('nodeStats.nodeModeDesc')
+              : t('nodeStats.recognitionActionModeDesc') }}
           </div>
         </div>
 

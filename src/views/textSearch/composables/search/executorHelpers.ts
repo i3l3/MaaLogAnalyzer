@@ -1,6 +1,7 @@
 import type { Ref } from 'vue'
 import type { SearchResult } from '../types'
 import type { SourceMode } from '../loadedSource/types'
+import { i18n } from '../../../../i18n'
 
 interface SearchResultState {
   searchResults: Ref<SearchResult[]>
@@ -14,9 +15,9 @@ export const clearSearchResultState = (state: SearchResultState) => {
 
 export const showSourceNotReadyMessage = (sourceMode: SourceMode) => {
   if (sourceMode === 'loaded') {
-    alert('请先选择已加载目标文件')
+    alert(i18n.global.t('textSearch.selectLoadedTargetFirst'))
   } else {
-    alert('请先选择文件')
+    alert(i18n.global.t('textSearch.selectFileFirst'))
   }
 }
 

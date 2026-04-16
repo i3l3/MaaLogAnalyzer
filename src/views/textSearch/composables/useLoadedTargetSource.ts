@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { SourceMode } from './loadedSource/types'
 import type { LoadedSourceStateOptions } from './loadedSource/optionTypes'
 import {
@@ -14,11 +15,12 @@ type UseLoadedTargetSourceOptions = LoadedSourceStateOptions
 export const useLoadedTargetSource = (options: UseLoadedTargetSourceOptions) => {
   const sourceMode = ref<SourceMode>('manual')
   const selectedLoadedTargetId = ref('')
+  const { t } = useI18n()
 
-  const sourceModeOptions = [
-    { label: '已加载目标', value: 'loaded' },
-    { label: '手动选择文件', value: 'manual' },
-  ]
+  const sourceModeOptions = computed(() => [
+    { label: t('textSearch.loadedTarget'), value: 'loaded' },
+    { label: t('textSearch.manualSelectFile'), value: 'manual' },
+  ])
 
   const loadedTargetOptions = computed(() => {
     return mapLoadedTargetOptions(options.loadedTargets.value ?? [])

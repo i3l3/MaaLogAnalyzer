@@ -1,5 +1,6 @@
 import { executeAndCommitSearch } from './executeAndCommit'
 import { ensureSearchPreconditions } from './preconditions'
+import { i18n } from '../../../../i18n'
 import type { TextSearchSearchExecutorOptions } from './executorTypes'
 
 export const createPerformSearchAction = (options: TextSearchSearchExecutorOptions) => {
@@ -15,7 +16,7 @@ export const createPerformSearchAction = (options: TextSearchSearchExecutorOptio
     try {
       await executeAndCommitSearch(options)
     } catch (error) {
-      alert('搜索失败: ' + error)
+      alert(i18n.global.t('textSearch.searchFailed') + error)
     } finally {
       options.isSearching.value = false
     }
